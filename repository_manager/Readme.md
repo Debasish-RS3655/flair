@@ -422,6 +422,40 @@ Authorization: <wallet-address>
 }
 ```
 
+### Shared Folder Workflow
+
+Flair uses a shared folder record as the working area for a committer on a branch. The data is scoped by `branchId` and `committerAddress`, so each user/branch pair gets its own shared folder entry.
+
+**What it stores:**
+- The uploaded model blob for the user
+- `metrics_before_aggregation` snapshots
+- `metrics_after_aggregation` snapshots
+- The current folder contents exposed through the pull/list/file routes
+
+**How it works:**
+1. Training or preprocessing code writes files into the shared folder through the `PUT /commit/sharedFolder/...` routes.
+2. The shared-folder controller stores those binary blobs in `sharedFolderFile` records.
+3. The API can list, fetch, or delete individual shared-folder files for the current branch/user pair.
+4. During commit finalization, the backend reads the latest shared folder entry and extracts `metrics_after_aggregation` from it.
+5. Those metrics are then attached to the finalized commit as commit metadata.
+
+**Important behavior:**
+- Commit finalization depends on the shared folder being present for the current branch and committer.
+- If the shared folder or metrics are missing, commit creation fails.
+- The metrics helper simply decodes the binary arrays stored in the shared-folder record.
+
+**Shared folder routes:**
+- `GET /commit/sharedFolder/pull` - fetch the full shared folder payload
+- `GET /commit/sharedFolder/metrics` - fetch only metrics arrays
+- `PUT /commit/sharedFolder/files/:committerAddress` - upload the model blob
+- `PUT /commit/sharedFolder/files/keras/:committerAddress/:key` - upload metric blobs
+- `GET /commit/sharedFolder/files/list` - list stored model files
+- `GET /commit/sharedFolder/files/list/keras/:committerAddress` - list metric file keys
+- `GET /commit/sharedFolder/files/:committerAddress(*)` - fetch the model blob
+- `GET /commit/sharedFolder/files/keras/:committerAddress/:key(*)` - fetch a metric blob
+- `DELETE /commit/sharedFolder/files/:committerAddress(*)` - delete the model blob
+- `DELETE /commit/sharedFolder/files/keras/:committerAddress/:key(*)` - delete a metric blob
+
 ---
 
 ## Commit Management
