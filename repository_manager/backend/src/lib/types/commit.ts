@@ -34,8 +34,15 @@ export interface commitParameters {
 
 // the metrics associated with the model are defined this way
 export interface commitMetrics {
-    accuracy: number,
-    loss: number
+    accuracy: number | null,
+    loss: number | null,
+    val_loss: number | null,
+    train_loss: number | null,
+    precision: number | null,
+    recall: number | null,
+    f1: number | null,
+    learning_rate: number | null,
+    notes: string | null
 }
 
 export type RejectedCommit = {
