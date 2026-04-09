@@ -289,6 +289,7 @@ def push(
             commit_hash = commit_data.get("commitHash")
             message = commit_data.get("message")
             commit_type = commit_data.get("commitType", "CHECKPOINT")
+            commit_metrics = commit_data.get("metrics")
             
             console.print(f"[bold cyan]═══ Commit {idx}/{len(commits_to_push)} ═══[/bold cyan]")
             console.print(f"[dim]Hash: {commit_hash[:16]}...[/dim]")
@@ -460,7 +461,8 @@ def push(
                         "zkmlReceiptToken": zkml_receipt_token,
                         "paramsReceiptToken": params_receipt_token,
                         "message": message,
-                        "architecture": framework
+                        "architecture": framework,
+                        "metrics": commit_metrics,
                     }
                 )
                 response.raise_for_status()

@@ -62,18 +62,31 @@ export const createCommitMetadata = async (commit: Commit): Promise<CommitNftMet
 
 // parse the metric values
 export function parseMetrics(metric: JsonValue): commitMetrics {
-    // Ensure metric is a valid object
-    if (typeof metric !== "object" || metric === null || Array.isArray(metric)) {
+    // Allow missing/null metrics by returning an empty metadata object.
+    if (metric === null || metric === undefined) {
+        return {};
+    }
+
+    if (typeof metric !== "object" || Array.isArray(metric)) {
         throw new Error("Invalid commit metrics: Expected an object.");
     }
-    const { accuracy, loss } = metric as Record<string, unknown>;
-    if (!accuracy) {
-        throw new Error('Accuracy not present in commit metric.');
+
+    const parsed: commitMetrics = {};
+    for (const [key, value] of Object.entries(metric as Record<string, unknown>)) {
+        if (
+            value === null ||
+            typeof value === "string" ||
+            typeof value === "number" ||
+            typeof value === "boolean"
+        ) {
+            parsed[key] = value;
+            continue;
+        }
+
+        throw new Error(`Invalid commit metric value for '${key}'. Expected string, number, boolean, or null.`);
     }
-    if (!loss) {
-        throw new Error('Loss not present in commit metric.');
-    }
-    return { accuracy, loss } as commitMetrics;
+
+    return parsed;
 }
 
 // create the metadata for uploading in the collection
