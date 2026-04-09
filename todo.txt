@@ -1,3 +1,1 @@
-1. update the repo manager backend to support the list of metrics included in the flair metrics command set
-
 2. support flair metrics import command for MLflow

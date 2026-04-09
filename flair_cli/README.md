@@ -290,6 +290,8 @@ Supported options for `flair metrics set`:
 
 ```bash
 flair metrics set --epoch 15 --accuracy 0.935 --val-loss 0.31
+flair metrics import
+flair metrics import --source ./mlruns --run-id <run_id>
 flair metrics show
 flair metrics reset
 ```
@@ -297,6 +299,7 @@ flair metrics reset
 Behavior:
 - Staging file is always `.flair/metrics.json`
 - `set` merges provided fields and updates `updatedAt`
+- `import` scans MLflow logs (default `./mlruns`), imports the latest run metrics, and merges into staged metrics
 - `show` prints current staged metrics
 - `reset` deletes staged metrics
 - `flair commit` copies staged metrics into commit metadata under `metrics` and then clears `.flair/metrics.json`
