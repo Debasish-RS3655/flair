@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma/index.js';
 import { authorizedPk } from '../middleware/auth/authHandler.js';
-import { extractMetricsAfter } from '../lib/sharedFolder/index.js';
 import storageProvider from '../lib/storage/index.js';
 import { constructIPFSUrl } from '../lib/ipfs/ipfs.js';
 import jwt from 'jsonwebtoken';
@@ -658,6 +657,7 @@ export const finalizeCommit = async (req: Request, res: Response) => {
             commitHash,         // commit hash will be created in the cli now
             paramHash,
             architecture,
+            metrics,
             initiateToken,
             zkmlReceiptToken,
             paramsReceiptToken
@@ -827,27 +827,28 @@ export const finalizeCommit = async (req: Request, res: Response) => {
         let targetBranchId = branchId;
         let forkedBranch: any = null;
 
-        const sharedFolder = await prisma.sharedFolderFile.findFirst({
-            where: { branchId, committerAddress: pk },
-            orderBy: { createdAt: 'desc' }
-        });
+        // Metrics are supplied directly by the commit finalization payload.
+        // This removes runtime dependence on shared-folder data.
+        let metricsFinal: Record<string, unknown> = {};
+        if (metrics !== undefined && metrics !== null) {
+            let parsedMetrics: unknown = metrics;
 
-        if (!sharedFolder) {
-            res.status(400).json({ error: { message: 'Shared folder not found. Please train and commit again.' } });
-            return;
+            if (typeof metrics === 'string') {
+                try {
+                    parsedMetrics = JSON.parse(metrics);
+                } catch {
+                    res.status(400).json({ error: { message: 'metrics must be valid JSON when provided as a string.' } });
+                    return;
+                }
+            }
+
+            if (typeof parsedMetrics !== 'object' || parsedMetrics === null || Array.isArray(parsedMetrics)) {
+                res.status(400).json({ error: { message: 'metrics must be a JSON object.' } });
+                return;
+            }
+
+            metricsFinal = parsedMetrics as Record<string, unknown>;
         }
-
-        const metricsRaw = extractMetricsAfter(sharedFolder);
-        const metricsExtracted = metricsRaw.at(-1);
-        if (!metricsExtracted) {
-            res.status(400).json({ error: { message: 'Metrics not found in the shared folder.' } });
-            return;
-        }
-
-        const metricsFinal = {
-            accuracy: parseFloat(metricsExtracted.accuracy),
-            loss: parseFloat(metricsExtracted.loss),
-        };
 
         const paramsIpfs = await prisma.ipfsObject.findUnique({
             where: { id: paramsReceiptJwt.paramsIpfsId }

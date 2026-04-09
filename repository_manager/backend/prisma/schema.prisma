@@ -45,31 +45,31 @@ model User {
 }
 
 model Repository {
-  id             String             @id @default(auto()) @map("_id") @db.ObjectId
-  name           String // name of the repository needs to be mandatorily as a main parameter
-  repoHash       String             @unique
-  branches       Branch[] // a single repository might contain serveral branches
-  writeAccessIds String[]           @default([]) // list of wallet addresses of the contribtors who can write to the repository. Iniitialized with the wallet addrdess of the creator
-  adminIds       String[]           @default([]) // list of admins that can give and revoke write permissions and delete the repository
-  contributorIds String[]           @default([]) // initialized
-  metadata       RepositoryMetdata? // optional metadata that needs to be added
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @default(now()) // timestamp of the latest update
+  id                String             @id @default(auto()) @map("_id") @db.ObjectId
+  name              String // name of the repository needs to be mandatorily as a main parameter
+  repoHash          String             @unique
+  branches          Branch[] // a single repository might contain serveral branches
+  writeAccessIds    String[]           @default([]) // list of wallet addresses of the contribtors who can write to the repository. Iniitialized with the wallet addrdess of the creator
+  adminIds          String[]           @default([]) // list of admins that can give and revoke write permissions and delete the repository
+  contributorIds    String[]           @default([]) // initialized
+  metadata          RepositoryMetdata? // optional metadata that needs to be added
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @default(now()) // timestamp of the latest update
   // the owner of the repository
-  ownerAddress   String
-  ownerId        String             @db.ObjectId
-  owner          User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerAddress      String
+  ownerId           String             @db.ObjectId
+  owner             User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   // base model stored as an IpfsObject
-  baseModelHash  String?            @unique // the base model hash can be used to check if the base model is already present
-  baseModelId    String?            @db.ObjectId
-  baseModel      IpfsObject?        @relation("RepositoryBaseModel", fields: [baseModelId], references: [id])
+  baseModelHash     String?            @unique // the base model hash can be used to check if the base model is already present
+  baseModelId       String?            @db.ObjectId
+  baseModel         IpfsObject?        @relation("RepositoryBaseModel", fields: [baseModelId], references: [id])
   // default branch hash for the repository
   defaultBranchHash String?
   // the base model CID can be fetched from `baseModel.cid`
-  collection     Collection?        @relation(fields: [collectionId], references: [id])
-  collectionId   String?            @unique @db.ObjectId
+  collection        Collection?        @relation(fields: [collectionId], references: [id])
+  collectionId      String?            @unique @db.ObjectId
   // the commit policy routes
-  commitPolicy   CommitPolicy       @default(MERGE)
+  commitPolicy      CommitPolicy       @default(MERGE)
 
   @@unique([ownerAddress, name])
 }
@@ -95,33 +95,33 @@ model Branch {
 // a single commit happens from only a single person
 // not like the way currently federated learning happens
 model Commit {
-  id                String       @id @default(auto()) @map("_id") @db.ObjectId
-  commitHash        String       @unique // hash of the current commit
-  previousCommitHash String      @default("_GENESIS_COMMIT_") // parent commit hash; first commit uses _GENESIS_COMMIT_
-  commitType        CommitType   @default(DELTA) // whether this commit is a delta or full checkpoint
-  status            CommitStatus // the status of this particuar commit
-  rejectedMessage   String? // (Optional) Fwhy the commit was rejected in case it was rejected.  
-  message           String // commit message
-  paramHash         String       @unique // hash of the parmeters for the commit
-  params            Params? // the param is stored as a separate model
-  createdAt         DateTime     @default(now()) // when the commit was created  
-  statusUpdatedAt   DateTime?    @default(now()) // when the status was last updated
+  id                 String       @id @default(auto()) @map("_id") @db.ObjectId
+  commitHash         String       @unique // hash of the current commit
+  previousCommitHash String       @default("_GENESIS_COMMIT_") // parent commit hash; first commit uses _GENESIS_COMMIT_
+  commitType         CommitType   @default(DELTA) // whether this commit is a delta or full checkpoint
+  status             CommitStatus // the status of this particuar commit
+  rejectedMessage    String? // (Optional) Fwhy the commit was rejected in case it was rejected.  
+  message            String // commit message
+  paramHash          String       @unique // hash of the parmeters for the commit
+  params             Params? // the param is stored as a separate model
+  createdAt          DateTime     @default(now()) // when the commit was created  
+  statusUpdatedAt    DateTime?    @default(now()) // when the status was last updated
   // for the current version the metric is an optional field
-  metrics           Metric? // the metrics of the model (e.g. accuracy, loss etc.)
-  architecture      String // new field included
+  metrics            Metric? // the metrics of the model (e.g. accuracy, loss etc.)
+  architecture       String // new field included
   // which branch the commit belongs to
-  branchId          String       @db.ObjectId
+  branchId           String       @db.ObjectId
   // when the branch is deleted so are the commmits in the branch
-  branch            Branch       @relation(fields: [branchId], references: [id])
-  committerAddress  String // wallet address of the contributor  
+  branch             Branch       @relation(fields: [branchId], references: [id])
+  committerAddress   String // wallet address of the contributor  
   // when the user is deleted the commit is not deleted
-  committerId       String       @db.ObjectId
-  committer         User         @relation(fields: [committerId], references: [id])
-  isDeleted         Boolean      @default(false) // a commit is only soft deleted
+  committerId        String       @db.ObjectId
+  committer          User         @relation(fields: [committerId], references: [id])
+  isDeleted          Boolean      @default(false) // a commit is only soft deleted
   // Nft converted commit properties
-  nft               Nft?         @relation("CommitToNft", fields: [nftId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-  nftId             String?      @unique @db.ObjectId
-  verified          Boolean      @default(false) // if the ZKML proof of the model has been verified
+  nft                Nft?         @relation("CommitToNft", fields: [nftId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  nftId              String?      @unique @db.ObjectId
+  verified           Boolean      @default(false) // if the ZKML proof of the model has been verified
 
   @@unique([branchId, previousCommitHash])
 }
@@ -212,8 +212,16 @@ model Nft {
 }
 
 type Metric {
-  accuracy Float
-  loss     Float
+  epoch         Float?
+  accuracy      Float?
+  val_loss      Float?
+  train_loss    Float?
+  loss          Float? // for compatibility with the shared folder architecture of the merger checkpoint commits
+  precision     Float?
+  recall        Float?
+  f1            Float?
+  learning_rate Float?
+  notes         String? // any additional notes about the metric
 }
 
 // metadata type as an embedded document
