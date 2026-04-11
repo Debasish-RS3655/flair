@@ -1,1 +1,8 @@
-2. support flair metrics import command for MLflow
+0. check the nftWalletLinkGate.ts middleware. Looks faulty to me, plus the addition of the linkedwallet type to user type
+
+
+1. build the merger with the shared folder architecture
+
+2. udate the ezkl libraries to prove and verify the entire commit history. which is currently incomplete
+
+3. support dual authentication with google and solana authentication

@@ -218,6 +218,24 @@ export async function updateRepository(req: Request, res: Response) {
 export async function createCollection(req: Request, res: Response) {
     const { repoHash } = req.params;
     try {
+        const pk = authorizedPk(res);
+        const matchedRepo = await prisma.repository.findUnique({ where: { repoHash } });
+        if (!matchedRepo) {
+            res.status(404).send({ error: { message: 'Repository not found.' } });
+            return;
+        }
+
+        const isAuthorized = matchedRepo.ownerAddress === pk || matchedRepo.adminIds.includes(pk);
+        if (!isAuthorized) {
+            res.status(403).send({ error: { message: 'Unauthorized. Only owner or admins can create NFT collections.' } });
+            return;
+        }
+
+        if (matchedRepo.collectionId) {
+            res.status(409).send({ error: { message: 'Repository already converted to an NFT collection.' } });
+            return;
+        }
+
         const collection = await convertRepoToCollection(umi, repoHash);
         res.status(200).json({ data: collection });
     }

@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { branchRouter } from './branch.js';
 import { modelRouter } from './basemodel.js';
 import * as repoController from '../controllers/repo.controller.js';
+import { nftWalletLinkGate } from '../middleware/auth/nftWalletLinkGate.js';
 
 const repoRouter = Router();
 
@@ -28,7 +29,7 @@ repoRouter.post('/create', repoController.createRepository);
 repoRouter.patch('/hash/:repoHash/update', repoController.updateRepository);
 
 // Convert to NFT collection route
-repoRouter.post('/hash/:repoHash/create_collection', repoController.createCollection);
+repoRouter.post('/hash/:repoHash/create_collection', nftWalletLinkGate, repoController.createCollection);
 
 // Delete repository
 repoRouter.delete('/hash/:repoHash/delete', repoController.deleteRepository);

@@ -1005,7 +1005,38 @@ export const finalizeCommit = async (req: Request, res: Response) => {
 
 export const createCommitNft = async (req: Request, res: Response, next: any) => {
     try {
+        const pk = authorizedPk(res);
         const { commitHash } = req.params;
+
+        const commit = await prisma.commit.findFirst({
+            where: { commitHash },
+            include: {
+                branch: {
+                    include: {
+                        repository: true
+                    }
+                },
+                nft: true
+            }
+        });
+
+        if (!commit) {
+            res.status(404).send({ error: { message: 'Commit not found.' } });
+            return;
+        }
+
+        if (commit.nft) {
+            res.status(409).send({ error: { message: 'This commit has already been minted as an NFT.' } });
+            return;
+        }
+
+        const repo = commit.branch.repository;
+        const hasPermission = repo.ownerAddress === pk || repo.adminIds.includes(pk) || repo.writeAccessIds.includes(pk);
+        if (!hasPermission) {
+            res.status(403).send({ error: { message: 'Unauthorized. You do not have permission to mint this commit NFT.' } });
+            return;
+        }
+
         const asset = await convertCommitToNft(umi, commitHash);
         res.status(200).json({ data: asset });
     }

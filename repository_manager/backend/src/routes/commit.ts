@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { sharedFolderRouter } from './sharedFolder.js';
 import { paramsUploader, zkmlUploader } from '../lib/multer/index.js';
 import * as commitController from '../controllers/commit.controller.js';
+import { nftWalletLinkGate } from '../middleware/auth/nftWalletLinkGate.js';
 
 const commitRouter = Router();
 
@@ -36,6 +37,6 @@ commitRouter.post('/create/finalize', commitController.finalizeCommit);
 commitRouter.use('/sharedFolder/', sharedFolderRouter);
 
 // Commit nft conversion route
-commitRouter.post('/hash/:commitHash/createNft', commitController.createCommitNft);
+commitRouter.post('/hash/:commitHash/createNft', nftWalletLinkGate, commitController.createCommitNft);
 
 export { commitRouter };

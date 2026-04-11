@@ -6,4 +6,5 @@ export type UserMetadata = {
     displayText: string | undefined;
     profileImage: string | undefined;
     bio: string | undefined;
+    linkedWallet?: string;
 }
