@@ -28,7 +28,7 @@ export const genAuth: Web3AuthHandlerCreator = (ctx) => (req, res, next) => {
   }
 }
 
-// extract the authoorized public key that is stored in the locals property
+// extract the authorized public key that is stored in the locals property
 export const authorizedPk = (res: Response) => res.locals.pubKey as string;
 
 

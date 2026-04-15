@@ -1030,10 +1030,11 @@ export const createCommitNft = async (req: Request, res: Response, next: any) =>
             return;
         }
 
-        const repo = commit.branch.repository;
-        const hasPermission = repo.ownerAddress === pk || repo.adminIds.includes(pk) || repo.writeAccessIds.includes(pk);
-        if (!hasPermission) {
-            res.status(403).send({ error: { message: 'Unauthorized. You do not have permission to mint this commit NFT.' } });
+        const committerAddress = commit.committerAddress?.toLowerCase();
+        const requesterAddress = pk?.toLowerCase();
+        const isCommitter = !!committerAddress && committerAddress === requesterAddress;
+        if (!isCommitter) {
+            res.status(403).send({ error: { message: 'Unauthorized. Only the original committer can mint this commit NFT.' } });
             return;
         }
 
