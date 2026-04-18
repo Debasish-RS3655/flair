@@ -3,6 +3,8 @@
 **Flair is a repository manager for collaborative, privacy-preserving machine learning.**  
 Think of it as **Git + GitHub for ML models**, designed to work with federated learning.
 
+![Flair Bot](assets/flairbot.png)
+
 Flair lets multiple contributors train a shared ML model **without sharing raw data**, while keeping a complete, verifiable history of every contribution.
 
 ---
