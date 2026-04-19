@@ -28,8 +28,13 @@ export const genAuth: Web3AuthHandlerCreator = (ctx) => (req, res, next) => {
   }
 }
 
-// extract the authorized public key that is stored in the locals property
-export const authorizedPk = (res: Response) => res.locals.pubKey as string;
+// extract the authenticated principal from request context.
+// for wallet-auth users, this is a wallet address.
+// for google-auth users, this is expected to be `google:<sub>`.
+export const authorizedPrincipal = (res: Response) => res.locals.pubKey as string;
+
+// backwards-compatible alias used by legacy controllers.
+export const authorizedPk = authorizedPrincipal;
 
 
 

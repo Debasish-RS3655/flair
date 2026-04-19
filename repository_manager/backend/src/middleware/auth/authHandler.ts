@@ -6,6 +6,7 @@ import { Web3AuthHandlerCreator } from "./context";
 import { siwsAuth } from "./siwsAuth.js";
 import { genAuth } from "./web3Auth.js";
 import { authorizedPk } from "./web3Auth.js";
+import { authorizedPrincipal } from "./web3Auth.js";
 
 export const authHandler: Web3AuthHandlerCreator = (ctx) => (req, res, next) => {
     const authHeader = req.header('Authorization');
@@ -27,3 +28,4 @@ export const authHandler: Web3AuthHandlerCreator = (ctx) => (req, res, next) => 
 
 // both the public key functions from both strategies do exactly the same thing so it make sense to use any of them
 export { authorizedPk };
+export { authorizedPrincipal };

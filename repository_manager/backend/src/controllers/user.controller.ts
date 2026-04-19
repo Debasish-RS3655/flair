@@ -3,7 +3,7 @@
 
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma/index.js';
-import { authorizedPk } from '../middleware/auth/authHandler.js';
+import { authorizedPrincipal } from '../middleware/auth/authHandler.js';
 import { UserMetadata } from '../lib/types/user.js';
 import { resolveUserIdFromPrincipal } from '../lib/auth/identity/index.js';
 
@@ -58,7 +58,7 @@ export async function getUserByWallet(req: Request, res: Response) {
 // Get current user profile
 export async function getUserProfile(req: Request, res: Response) {
     try {
-        const principal = authorizedPk(res);
+        const principal = authorizedPrincipal(res);
         const userId = await resolveUserIdFromPrincipal(principal);
         if (!userId) {
             res.status(404).json({ error: 'User not found' });
@@ -88,7 +88,7 @@ export async function getUserProfile(req: Request, res: Response) {
 // Update user
 export async function updateUser(req: Request, res: Response) {
     try {
-        const principal = authorizedPk(res);
+        const principal = authorizedPrincipal(res);
         const userId = await resolveUserIdFromPrincipal(principal);
         if (!userId) {
             res.status(404).send({ error: { message: 'User not found.' } });
@@ -149,7 +149,7 @@ export async function updateUser(req: Request, res: Response) {
 // Deleting the user also deletes all his repositories
 export async function deleteUser(req: Request, res: Response) {
     try {
-        const principal = authorizedPk(res);
+        const principal = authorizedPrincipal(res);
         const userId = await resolveUserIdFromPrincipal(principal);
         if (!userId) {
             res
