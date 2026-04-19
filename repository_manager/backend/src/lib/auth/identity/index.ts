@@ -21,6 +21,55 @@ export const isGooglePrincipal = (principal: string): boolean => principal.start
 
 export const getGoogleSubject = (principal: string): string => principal.slice(GOOGLE_PRINCIPAL_PREFIX.length);
 
+type GoogleIdentityProfile = {
+    email?: string;
+    name?: string;
+    picture?: string;
+};
+
+export async function ensureGoogleIdentityForSubject(googleSubject: string, profile?: GoogleIdentityProfile): Promise<{ principal: string; userId: string }> {
+    const principal = `${GOOGLE_PRINCIPAL_PREFIX}${googleSubject}`;
+
+    const user = await prisma.user.findUnique({
+        where: { wallet: principal },
+        select: { id: true }
+    }) ?? await prisma.user.create({
+        data: {
+            wallet: principal,
+            metadata: {
+                set: {
+                    email: profile?.email,
+                    name: profile?.name,
+                    profileImage: profile?.picture,
+                }
+            }
+        },
+        select: { id: true }
+    });
+
+    const authIdentity = getAuthIdentityDelegate();
+    if (authIdentity) {
+        await authIdentity.upsert({
+            where: {
+                provider_subject: {
+                    provider: GOOGLE_PROVIDER,
+                    subject: googleSubject,
+                },
+            },
+            update: {
+                userId: user.id,
+            },
+            create: {
+                provider: GOOGLE_PROVIDER,
+                subject: googleSubject,
+                userId: user.id,
+            },
+        });
+    }
+
+    return { principal, userId: user.id };
+}
+
 export async function ensureWalletIdentityForWalletPrincipal(walletPrincipal: string): Promise<void> {
     const user = await prisma.user.findUnique({
         where: { wallet: walletPrincipal },

@@ -3,8 +3,14 @@ import { createSignInData, verifySIWSsignin } from '../lib/auth/siws/index.js';
 import { verifyGenSignInFirstTime } from "../lib/auth/general/index.js";
 import { ensureWalletIdentityForWalletPrincipal } from '../lib/auth/identity/index.js';
 import { linkWalletIdentityToUser, resolveUserIdFromPrincipal } from '../lib/auth/identity/index.js';
+import { ensureGoogleIdentityForSubject } from '../lib/auth/identity/index.js';
+import { verifyGoogleIdToken } from '../lib/auth/google/index.js';
 import { SolanaSignInInput, SolanaSignInOutput } from "@solana/wallet-standard-features";
 import { authorizedPk } from '../middleware/auth/authHandler.js';
+import jwt from 'jsonwebtoken';
+
+const SESSION_JWT_SECRET = process.env.SESSION_JWT_SECRET || 'flair-session-secret';
+const SESSION_JWT_EXPIRES_IN_SECONDS = Number(process.env.SESSION_JWT_EXPIRES_IN_SECONDS || 86400);
 
 export const getSignInData = async (req: Request, res: Response) => {
     // Wrap in try/catch so we never drop the connection on validation errors (prevents socket hang-ups)
@@ -91,5 +97,42 @@ export const linkWallet = async (req: Request, res: Response) => {
         }
         console.error('Error linking wallet:', err);
         res.status(400).json({ success: false, error: message });
+    }
+};
+
+export const googleSignIn = async (req: Request, res: Response) => {
+    try {
+        const { idToken } = req.body as { idToken?: string };
+        if (!idToken || typeof idToken !== 'string') {
+            res.status(400).json({ success: false, error: 'Google idToken is required.' });
+            return;
+        }
+
+        const googlePayload = await verifyGoogleIdToken(idToken);
+        const identity = await ensureGoogleIdentityForSubject(googlePayload.sub, {
+            email: googlePayload.email,
+            name: googlePayload.name,
+            picture: googlePayload.picture,
+        });
+
+        const sessionToken = jwt.sign(
+            {
+                sub: identity.principal,
+            },
+            SESSION_JWT_SECRET,
+            { expiresIn: SESSION_JWT_EXPIRES_IN_SECONDS }
+        );
+
+        res.status(200).json({
+            success: true,
+            data: {
+                sessionToken,
+                principal: identity.principal,
+                userId: identity.userId,
+            },
+        });
+    } catch (err: any) {
+        console.error('Error in Google sign-in:', err);
+        res.status(401).json({ success: false, error: err?.message || 'Google sign-in failed.' });
     }
 };

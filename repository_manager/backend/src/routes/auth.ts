@@ -15,6 +15,9 @@ authRouter.get('/signin/:address', authController.getSignInData);
 // Sign in is the only endpoint where we send the headers as a body for the first time verification
 authRouter.post('/signin', authController.signIn);
 
+// Google sign-in endpoint for session token issuance.
+authRouter.post('/signin/google', authController.googleSignIn);
+
 // Link a wallet to the currently authenticated user using the existing wallet sign-in token.
 authRouter.post('/link/wallet', authHandler(signInContext), authController.linkWallet);
 
