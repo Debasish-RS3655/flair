@@ -5,6 +5,7 @@
 import { Web3AuthHandlerCreator } from "./context";
 import { siwsAuth } from "./siwsAuth.js";
 import { genAuth } from "./web3Auth.js";
+import { jwtAuth } from './jwtAuth.js';
 import { authorizedPk } from "./web3Auth.js";
 import { authorizedPrincipal } from "./web3Auth.js";
 
@@ -21,6 +22,9 @@ export const authHandler: Web3AuthHandlerCreator = (ctx) => (req, res, next) => 
     }
     else if (authHeader.includes('siws')) {
         siwsAuth(ctx)(req, res, next);
+    }
+    else if (authHeader.startsWith('Bearer ')) {
+        jwtAuth(ctx)(req, res, next);
     }
     else res.status(400).send({ error: { message: 'Invalid sign in strategy.' } });
 }
