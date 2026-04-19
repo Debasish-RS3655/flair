@@ -1,43 +1,30 @@
 import type { RequestHandler } from 'express';
-import { authorizedPk } from './authHandler.js';
-import {
-    getAttachedWalletForGooglePrincipal,
-    isGooglePrincipal,
-} from '../../lib/auth/identity/index.js';
+import { authorizedPrincipal } from './authHandler.js';
+import { isGooglePrincipal } from '../../lib/auth/identity/index.js';
 
 /**
  * Ensures NFT actions always have a wallet context.
  *
- * Backward compatibility:
- * - Wallet-native users (principal is a wallet address) pass through.
- * - Google users must have a WALLET identity attached to their canonical account.
+ * NFT actions are wallet-critical and must run under wallet auth context.
  */
 export const nftWalletLinkGate: RequestHandler = async (_req, res, next) => {
     try {
-        const principal = authorizedPk(res);
+        const principal = authorizedPrincipal(res);
         if (!principal) {
             res.status(401).send({ error: { message: 'Unauthorized user context.' } });
             return;
         }
 
-        // Existing wallet-native identity continues to work as-is.
-        if (!isGooglePrincipal(principal)) {
-            res.locals.nftWallet = principal;
-            next();
-            return;
-        }
-
-        const attachedWallet = await getAttachedWalletForGooglePrincipal(principal);
-        if (!attachedWallet) {
+        if (isGooglePrincipal(principal)) {
             res.status(403).send({
                 error: {
-                    message: 'Wallet not linked. Please link a Solana wallet before performing NFT actions.'
+                    message: 'Wallet-authenticated session required for NFT actions. Please sign in with your Solana wallet.'
                 }
             });
             return;
         }
 
-        res.locals.nftWallet = attachedWallet;
+        res.locals.nftWallet = principal;
         next();
     } catch (err) {
         console.error('Error while validating wallet link for NFT action:', err);

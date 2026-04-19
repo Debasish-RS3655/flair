@@ -6,6 +6,8 @@ type GoogleTokenInfo = {
     aud?: string;
 };
 
+
+// this endpoint is constant therefore we can hardcode it without needing to put it in env vars
 const GOOGLE_TOKENINFO_ENDPOINT = 'https://oauth2.googleapis.com/tokeninfo';
 
 export async function verifyGoogleIdToken(idToken: string): Promise<Required<Pick<GoogleTokenInfo, 'sub'>> & GoogleTokenInfo> {

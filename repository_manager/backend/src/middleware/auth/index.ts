@@ -6,3 +6,4 @@ export * from './jwtAuth.js';
 export * from './byPassHandler.js';
 export * from './treeAuthHandler.js';
 export * from './nftWalletLinkGate.js';
+export * from './walletPrincipalGate.js';
