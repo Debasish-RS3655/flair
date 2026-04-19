@@ -11,6 +11,7 @@ import { v4 as uuidV4 } from 'uuid';
 import { ZKMLProofCreateObj } from '../lib/types/zkmlproof.js';
 import { convertCommitToNft } from '../lib/nft/nft.js';
 import { umi } from '../lib/nft/umi.js';
+import { resolveUserIdFromPrincipal } from '../lib/auth/identity/index.js';
 
 const ZKP_JWT_SECRET = process.env.ZKP_JWT_SECRET || 'super-secret-commit-generation';
 const COMMIT_JWT_SECRET = process.env.COMMIT_JWT_SECRET || 'another-super-secret-commit-generation';
@@ -792,8 +793,8 @@ export const finalizeCommit = async (req: Request, res: Response) => {
         const commitTypeRaw = (req.body?.commitType as string | undefined)?.toUpperCase();
         const commitType = commitTypeRaw === 'CHECKPOINT' ? 'CHECKPOINT' : 'DELTA';
 
-        const committer = await prisma.user.findFirst({ where: { wallet: pk } });
-        if (!committer) {
+        const committerId = await resolveUserIdFromPrincipal(pk);
+        if (!committerId) {
             res.status(401).json({ error: { message: 'User not found.' } });
             return;
         }
@@ -912,7 +913,7 @@ export const finalizeCommit = async (req: Request, res: Response) => {
                     params: {
                         create: paramsCreateInput,
                     },
-                    committerId: committer.id
+                    committerId
                 },
                 include: {
                     params: {

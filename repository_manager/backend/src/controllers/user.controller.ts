@@ -5,6 +5,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma/index.js';
 import { authorizedPk } from '../middleware/auth/authHandler.js';
 import { UserMetadata } from '../lib/types/user.js';
+import { resolveUserIdFromPrincipal } from '../lib/auth/identity/index.js';
 
 // Get user by username
 export async function getUserByUsername(req: Request, res: Response) {
@@ -57,10 +58,16 @@ export async function getUserByWallet(req: Request, res: Response) {
 // Get current user profile
 export async function getUserProfile(req: Request, res: Response) {
     try {
-        const wallet = authorizedPk(res);
+        const principal = authorizedPk(res);
+        const userId = await resolveUserIdFromPrincipal(principal);
+        if (!userId) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+
         // Include the repositories and commits for the user
         const user = await prisma.user.findUnique({
-            where: { wallet },
+            where: { id: userId },
             include: {
                 repositories: true,
                 commits: true,
@@ -81,7 +88,13 @@ export async function getUserProfile(req: Request, res: Response) {
 // Update user
 export async function updateUser(req: Request, res: Response) {
     try {
-        const wallet = authorizedPk(res);
+        const principal = authorizedPk(res);
+        const userId = await resolveUserIdFromPrincipal(principal);
+        if (!userId) {
+            res.status(404).send({ error: { message: 'User not found.' } });
+            return;
+        }
+
         const {
             metadata,
             username,
@@ -89,7 +102,7 @@ export async function updateUser(req: Request, res: Response) {
 
         // Fetch existing user
         const existingUser = await prisma.user.findUnique({
-            where: { wallet },
+            where: { id: userId },
             select: { metadata: true, username: true },
         });
         if (!existingUser) {
@@ -114,7 +127,7 @@ export async function updateUser(req: Request, res: Response) {
 
         // Perform the update
         const updatedUser = await prisma.user.update({
-            where: { wallet },
+            where: { id: userId },
             data: updateData,
             include: {
                 // Optionally return related data
@@ -136,9 +149,17 @@ export async function updateUser(req: Request, res: Response) {
 // Deleting the user also deletes all his repositories
 export async function deleteUser(req: Request, res: Response) {
     try {
-        const wallet = authorizedPk(res);
+        const principal = authorizedPk(res);
+        const userId = await resolveUserIdFromPrincipal(principal);
+        if (!userId) {
+            res
+                .status(404)
+                .send({ error: { message: 'User does not exist to delete!' } });
+            return;
+        }
+
         const deletedUser = await prisma.user.delete({
-            where: { wallet },
+            where: { id: userId },
         });
         if (!deletedUser) {
             res

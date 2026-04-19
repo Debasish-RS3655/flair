@@ -3,6 +3,7 @@
 
 import { Router } from "express";
 import * as authController from '../controllers/auth.controller.js';
+import { authHandler, signInContext } from '../middleware/auth/index.js';
 
 const authRouter = Router();
 
@@ -13,5 +14,8 @@ authRouter.get('/signin/:address', authController.getSignInData);
 
 // Sign in is the only endpoint where we send the headers as a body for the first time verification
 authRouter.post('/signin', authController.signIn);
+
+// Link a wallet to the currently authenticated user using the existing wallet sign-in token.
+authRouter.post('/link/wallet', authHandler(signInContext), authController.linkWallet);
 
 export { authRouter };

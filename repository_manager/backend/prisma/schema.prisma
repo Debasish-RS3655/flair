@@ -30,12 +30,18 @@ enum CommitType {
   CHECKPOINT
 }
 
+enum AuthProvider {
+  GOOGLE
+  WALLET
+}
+
 // user model needed to be created
 model User {
   id                String        @id @default(auto()) @map("_id") @db.ObjectId
   username          String?       @unique
   metadata          UserMetadata? // the metadata to be displayed for the user, by default not required
   wallet            String        @unique // walet address of the user
+  authIdentities    AuthIdentity[]
   repositories      Repository[] // repositories created by the user
   commits           Commit[] // commits created by the user
   createdAt         DateTime      @default(now())
@@ -287,6 +293,18 @@ model InitiationBlock {
   pk           String   @id @map("_id")
   blockedUntil DateTime
   createdAt    DateTime @default(now())
+}
+
+model AuthIdentity {
+  id        String       @id @default(auto()) @map("_id") @db.ObjectId
+  provider  AuthProvider
+  subject   String
+  userId    String       @db.ObjectId
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+
+  @@unique([provider, subject])
+  @@index([userId])
 }
 
 // the base model data must also include its details now

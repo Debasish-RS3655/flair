@@ -1,15 +1,16 @@
 import type { RequestHandler } from 'express';
-import { prisma } from '../../lib/prisma/index.js';
 import { authorizedPk } from './authHandler.js';
-
-const GOOGLE_PRINCIPAL_PREFIX = 'google:';
+import {
+    getAttachedWalletForGooglePrincipal,
+    isGooglePrincipal,
+} from '../../lib/auth/identity/index.js';
 
 /**
  * Ensures NFT actions always have a wallet context.
  *
  * Backward compatibility:
  * - Wallet-native users (principal is a wallet address) pass through.
- * - Google users must have metadata.linkedWallet configured.
+ * - Google users must have a WALLET identity attached to their canonical account.
  */
 export const nftWalletLinkGate: RequestHandler = async (_req, res, next) => {
     try {
@@ -20,19 +21,14 @@ export const nftWalletLinkGate: RequestHandler = async (_req, res, next) => {
         }
 
         // Existing wallet-native identity continues to work as-is.
-        if (!principal.startsWith(GOOGLE_PRINCIPAL_PREFIX)) {
+        if (!isGooglePrincipal(principal)) {
             res.locals.nftWallet = principal;
             next();
             return;
         }
 
-        const user = await prisma.user.findUnique({
-            where: { wallet: principal },
-            select: { metadata: true }
-        });
-
-        const linkedWallet = (user?.metadata as Record<string, unknown> | null)?.linkedWallet;
-        if (!linkedWallet || typeof linkedWallet !== 'string') {
+        const attachedWallet = await getAttachedWalletForGooglePrincipal(principal);
+        if (!attachedWallet) {
             res.status(403).send({
                 error: {
                     message: 'Wallet not linked. Please link a Solana wallet before performing NFT actions.'
@@ -41,7 +37,7 @@ export const nftWalletLinkGate: RequestHandler = async (_req, res, next) => {
             return;
         }
 
-        res.locals.nftWallet = linkedWallet;
+        res.locals.nftWallet = attachedWallet;
         next();
     } catch (err) {
         console.error('Error while validating wallet link for NFT action:', err);

@@ -8,6 +8,7 @@ import { RepositoryMetdata } from '../lib/types/repo';
 import { convertRepoToCollection } from '../lib/nft/nft.js';
 import { umi } from '../lib/nft/umi.js';
 import { v4 as uuidv4 } from 'uuid';
+import { resolveUserIdFromPrincipal } from '../lib/auth/identity/index.js';
 
 // Get all the repositories for the particular user
 export async function getAllRepositories(req: Request, res: Response) {
@@ -91,10 +92,8 @@ export async function createRepository(req: Request, res: Response) {
             return;
         }
 
-        const owner = await prisma.user.findFirst({
-            where: { wallet: pk }
-        });
-        if (!owner) {
+        const ownerId = await resolveUserIdFromPrincipal(pk);
+        if (!ownerId) {
             res.status(401).send({ error: { message: 'User not found!' } });
             return;
         }
@@ -115,7 +114,7 @@ export async function createRepository(req: Request, res: Response) {
                     }
                 },
                 repoHash: uuidv4(),
-                ownerId: owner.id
+                ownerId
             }
         });
 
