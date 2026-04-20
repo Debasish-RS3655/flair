@@ -1,176 +1,183 @@
 # Flair
 
-**Flair is a repository manager for collaborative, privacy-preserving machine learning.**  
-Think of it as **Git + GitHub for ML models**, designed to work with federated learning.
+Flair is a local-first repository system for collaborative, privacy-preserving machine learning.
+
+Think of it as Git-style version control for model evolution: contributors train locally, publish model updates as commits, and keep a verifiable history without uploading raw datasets.
 
 ![Flair Bot](assets/flairbot.png)
 
-Flair lets multiple contributors train a shared ML model **without sharing raw data**, while keeping a complete, verifiable history of every contribution.
+## Table Of Contents
 
----
+- [What Flair Solves](#what-flair-solves)
+- [Core Principles](#core-principles)
+- [High-Level Architecture](#high-level-architecture)
+- [Workspace Structure](#workspace-structure)
+- [Quick Start](#quick-start)
+- [CLI Workflow At A Glance](#cli-workflow-at-a-glance)
+- [Configuration](#configuration)
+- [Privacy And Security Model](#privacy-and-security-model)
+- [Current Status](#current-status)
+- [Contributing](#contributing)
+- [Related Docs](#related-docs)
+- [Disclaimer](#disclaimer)
 
-## Why Flair?
+## What Flair Solves
 
-Traditional collaboration platforms assume that:
-- data can be centralized
-- training happens in one place
-- ownership of model contributions is unclear
+Traditional ML collaboration often assumes centralized data and centralized training.
 
-Flair is built for situations where:
-- data **must remain private**
-- training happens **locally**
-- multiple contributors improve the same model
-- provenance, auditability, and ownership matter
+Flair is built for teams where:
 
-Examples include research, sensitive datasets, regulated domains, and collaborative experimentation.
+- data must stay private and local
+- multiple contributors train the same model asynchronously
+- contribution provenance and auditability matter
+- model evolution should be reproducible and reviewable
 
----
+Instead of sharing datasets, contributors share model artifacts and metadata as immutable commits.
 
-## Core Idea (No ML Background Required)
+## Core Principles
 
-Instead of sending data to a server:
+- Local-first training: training runs in contributor-controlled environments.
+- No raw data upload: only model artifacts, metadata, and optional proofs are exchanged.
+- Git-like workflow: repositories, branches, commits, history, revert/reset, and diff.
+- Verifiability: optional zkML proof flow for validating training claims.
+- Provenance: commit lineage and contribution history are explicit and queryable.
 
-1. Each contributor **trains the model locally** on their own data  
-2. Only the **model updates** (not the data) are shared  
-3. Every update is treated as a **commit**, just like Git  
-4. Commits can be reviewed, merged, reverted, and tracked over time  
+## High-Level Architecture
 
-Raw datasets remain **within the contributor’s training environment**.
+```text
+Local Contributor Environment
+  -> Train on private data
+  -> Generate model params / metadata / optional ZK proof
+  -> Push commit via Flair CLI
 
-**Privacy by design:** Flair records only model updates and metadata as commits. Training can happen in any environment (local machines, cloud GPUs, or research clusters), while datasets remain within the contributor’s own training environment and are never uploaded to the repository.
+Flair Repository Manager Backend
+  -> Auth + repository metadata
+  -> Commit ingestion + branch state
+  -> Optional proof verification + provenance services
 
----
+Aggregation / Training Orchestration (e.g., Flower-style workflows)
+  -> Merge asynchronous updates
+  -> Produce next global model state
+```
 
-## How Flair Works
+## Quick Start
 
-### 1. Repositories for ML Models
-- Create a repository for a machine learning model
-- Push an initial (untrained or pre-trained) model
-- Manage branches, permissions, and contributors
+### 1. Prerequisites
 
-### 2. Local Training
-- Contributors pull the latest model
-- Training happens **entirely on their local system**
-- Flair does not access or upload raw datasets
+- Python 3.10+
+- Node.js 18+
+- pnpm
+- MongoDB instance (for backend)
 
-### 3. Commits, Not Uploads
-- Each training result is a **commit**
-- Commits include:
-  - model parameter updates
-  - metadata
-  - optional metrics
-- Commits are immutable and traceable
-
-### 4. Asynchronous Aggregation
-- Flair integrates with federated learning engines (e.g. Flower)
-- Multiple contributors can train concurrently
-- Updates are merged asynchronously using defined aggregation policies
-- No locking, no “first commit wins” problem
-
-### 5. Verifiable Training (Optional)
-- Commits can include zero-knowledge proofs (zkML)
-- Proofs verify that training followed agreed rules
-- Verification happens asynchronously on the backend
-- Proofs do **not** reveal training data
-
-### 6. Ownership & Provenance
-- Commits can be minted as NFTs
-- Ownership of model contributions is cryptographically recorded
-- Provenance is transparent and auditable
-
----
-
-## What Flair Is NOT
-
-Flair is **not**:
-- a model deployment platform
-- a clinical or diagnostic system
-- a replacement for ML frameworks
-- a data collection service
-
-Flair is **infrastructure for building models**, not for making decisions.
-
----
-
-## Architecture Overview
+### 2. Start Backend
 
 ```bash
-Local Client
-├─ Trains model on private data
-├─ Produces model update + metadata
-└─ Pushes commit via Flair CLI
-↓
-Flair Backend
-├─ Stores repo & commit metadata
-├─ Triggers async aggregation
-├─ Verifies zk proofs (optional)
-└─ Records provenance
-↓
-Federated Learning Engine (e.g. Flower)
-├─ Aggregates updates
-├─ Handles staleness & concurrency
-└─ Produces updated global model
+cd repository_manager/backend
+pnpm install
+pnpm run build
+pnpm run dev
 ```
----
 
-## Supported Frameworks
+### 3. Start Auth Frontend
 
-- **PyTorch**
-- **TensorFlow**
+```bash
+cd repository_manager/auth_frontend
+cp .env.example .env
+pnpm install
+pnpm run dev
+```
 
----
+### 4. Install And Use Flair CLI
 
-## Privacy Model
+From the workspace root:
 
-- Raw training data **never leaves the client**
-- Only model updates are shared
-- No dataset uploads
-- No centralized data storage
-- Optional cryptographic verification of training
+```bash
+pip install -e ./flair_cli
+flair --help
+```
 
-Flair is designed so that **data cannot be extracted from the system**.
+The CLI creates local config and session data under `~/.flair/`.
 
----
+## CLI Workflow At A Glance
 
-## Status
+Typical end-to-end flow:
 
-⚠️ **Early-stage / research-oriented project**
+```bash
+flair auth login
+flair init --description "my federated model"
+flair add
+flair params create --model model.pt
+flair metrics set --epoch 1 --accuracy 0.91
+flair commit -m "Initial local training update"
+flair push
+flair log --graph
+flair diff <commitA> <commitB>
+```
 
-- APIs may change
-- Not production-ready
-- Intended for developers and researchers
-- Feedback and contributions are welcome
+Useful commands:
 
----
+- `flair status`: current branch/head, commit completeness, unpushed count
+- `flair branch`: list/create/delete branches
+- `flair checkout <branch>`: switch branch
+- `flair basemodel add|check|download|delete`: manage base model artifacts
+- `flair revert` / `flair reset`: move local history state
 
-## Open Source Philosophy
+Full command reference: see `flair_cli/README.md`.
 
-Flair is open source at the **client and protocol layer** to enable:
-- transparency
-- auditability
-- ecosystem integration
-- community contributions
+## Configuration
 
-Some hosted services and infrastructure components may remain closed-source.
+CLI defaults are local-development friendly and can be updated via config commands or `~/.flair/config.yaml`.
 
----
+Default values in CLI config include:
 
-## Disclaimer
+- `api_base_url: http://localhost:2112`
+- `auth_url: http://localhost:5173`
 
-Flair is intended for **research and development use only**.  
-It does not provide medical advice, clinical decision support, or diagnostic functionality.
+If your backend/frontend run on different ports, update CLI config accordingly.
 
-Any model built using Flair must be validated independently before real-world deployment.
+## Privacy And Security Model
 
----
+- Raw datasets are not uploaded through Flair workflows.
+- Shared artifacts are model-related files and commit metadata.
+- Session/auth tokens are stored locally (`~/.flair/session.json`), never private keys.
+- Optional zkML support enables proof-based validation of training constraints without exposing raw data.
+
+## Current Status
+
+Flair is an early-stage, research-oriented project.
+
+- APIs and data contracts may evolve quickly.
+- Some modules are experimental.
+- Backward compatibility is not guaranteed between early versions.
+
+Recommended use today: experimentation, protocol design, and developer research.
 
 ## Contributing
 
-Contributions, discussions, and design feedback are welcome.
+Contributions are welcome.
 
-Please note:
-- Flair is infrastructure software
-- correctness and clarity matter more than speed
-- breaking changes may occur in early versions
+Areas where help is especially valuable:
 
----
+- CLI ergonomics and reliability
+- backend API hardening and observability
+- proof and verification pipeline robustness
+- docs and onboarding clarity
+
+Contribution expectations:
+
+- prioritize correctness and reproducibility
+- include tests where practical
+- keep changes focused and well documented
+
+## Related Docs
+
+- `docs/overview.md`
+- `docs/routes_todo.md`
+- `flair_cli/README.md`
+- `repository_manager/Readme.md`
+
+## Disclaimer
+
+Flair is infrastructure for collaborative ML development and research.
+
+It is not a model deployment platform, not a clinical or diagnostic system, and not a substitute for independent validation in real-world domains.
