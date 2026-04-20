@@ -20,6 +20,7 @@ import { SignedInProvider } from "./components/signInTokenProivder";
 import { AdapterProvider } from "./components/AdapterProvider";
 
 import Auth from "./pages/Auth";
+import GoogleAuth from "./pages/GoogleAuth";
 import TreeAuth from './pages/treeAuth';
 
 const queryClient = new QueryClient();
@@ -53,7 +54,10 @@ export const App: FC = () => {
                                     <WalletModalProvider>
                                         <Router>
                                             <Routes>
+                                                {/* Solana wallet workflow */}
                                                 <Route path="/" element={<Auth />} />
+                                                {/* Google OAuth2 workflow */}
+                                                <Route path="/google" element={<GoogleAuth />} />
                                                 <Route path="/tree" element={<TreeAuth />} />
                                             </Routes>
                                         </Router>

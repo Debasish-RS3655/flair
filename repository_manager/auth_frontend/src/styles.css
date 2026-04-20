@@ -42,4 +42,37 @@ html, body {
     max-width: 600px;
     color: #ffffff; /* White text for contrast */
   }
+
+  /* Google authentication section with a radial gradient background */
+  .google-home {
+    background: radial-gradient(circle at top, rgba(66, 133, 244, 0.18), transparent 35%), #181818;
+  }
+
+  .google-board {
+    max-width: 760px;
+    text-align: left;
+  }
+
+  .workflow-section {
+    padding: 8px 0;
+  }
+
+  .workflow-divider {
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    margin-top: 24px;
+    padding-top: 24px;
+  }
+
+  .google-button-slot {
+    margin: 20px 0;
+    min-height: 48px;
+  }
+
+  .session-summary {
+    margin-top: 12px;
+  }
+
+  .error-text {
+    color: #ff8a80;
+  }
   

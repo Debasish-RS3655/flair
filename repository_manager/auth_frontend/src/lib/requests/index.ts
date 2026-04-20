@@ -2,6 +2,7 @@ import { DateTime } from 'luxon';
 import { MemoryStoredTokenSiws } from "../auth/siws";
 import { SolanaSignInInput, SolanaSignInOutput } from "@solana/wallet-standard-features";
 import { LocalStorageTokenGen } from "../auth/general";
+import { GoogleSessionToken } from "../auth/google";
 import b58 from 'bs58';
 import { parseSignInMessage } from "../auth/helper/abnf_prarser";
 
@@ -103,6 +104,26 @@ export const verifyToken = (memoryToken: string, action: string): Boolean => {
   return true;
 }
 
+// Google OAuth2 workflow requests.
+// This uses the session JWT issued by the backend after Google sign-in.
+export const googleRequest = async (contents: requestParams): Promise<Response> => {
+  const { method, url, data } = contents;
+  const googleToken = GoogleSessionToken.getInstance().getToken();
+  if (!googleToken) {
+    throw new Error('Google session not found. Please sign in with Google first.');
+  }
+
+  return await fetch(url, {
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${googleToken}`
+    },
+    body: data ? JSON.stringify(data) : undefined,
+    method: method ? method : data ? 'POST' : 'GET'
+  });
+};
+
 // parameters for the request
 export interface requestParams {
   method?: string;
@@ -119,6 +140,10 @@ export const request = async (contents: requestParams) => {
   // if we are connected using SIWS
   if (MemoryStoredTokenSiws.getInstance().output) {
     return await siwsRequest(defaultedContents);
+  }
+  // Google OAuth2 workflow.
+  else if (GoogleSessionToken.getInstance().getToken()) {
+    return await googleRequest(defaultedContents);
   }
   // if connected using the general workflow
   else if (LocalStorageTokenGen.getInstance().getToken()) {

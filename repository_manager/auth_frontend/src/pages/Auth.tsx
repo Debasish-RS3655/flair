@@ -6,6 +6,7 @@ import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { LocalStorageTokenGen } from '../lib/auth/general';
 import { verifyToken } from '../lib/requests';
 import { usesignedIn } from '../components/signInTokenProivder';
+import { Link } from 'react-router-dom';
 
 interface ConnectedDetails {
   walletAddress: string;
@@ -94,6 +95,7 @@ export default function Auth() {
     <div className="home-container">
       <h1>Sign into Flair</h1>
       <div className="display-board">
+        {/* Solana wallet workflow */}
         {connectedDetails ? (
           <div>
             <p><strong>Wallet Address:</strong> {connectedDetails.walletAddress}</p>
@@ -105,6 +107,9 @@ export default function Auth() {
           <div>
             <WalletMultiButton />
             <p>No wallet connected. Click the button above to connect.</p>
+            <p>
+              Prefer Google sign-in? <Link to="/google">Use the Google OAuth page</Link>.
+            </p>
           </div>
         )}
       </div>
