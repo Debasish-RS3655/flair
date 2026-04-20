@@ -92,7 +92,7 @@ export default function Auth() {
   }
 
   return (
-    <div className="home-container">
+    <div className="home-container google-home">
       <h1>Sign into Flair</h1>
       <div className="display-board">
         {/* Solana wallet workflow */}

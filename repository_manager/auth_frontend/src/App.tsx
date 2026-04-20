@@ -54,10 +54,10 @@ export const App: FC = () => {
                                     <WalletModalProvider>
                                         <Router>
                                             <Routes>
-                                                {/* Solana wallet workflow */}
-                                                <Route path="/" element={<Auth />} />
                                                 {/* Google OAuth2 workflow */}
-                                                <Route path="/google" element={<GoogleAuth />} />
+                                                <Route path="/" element={<GoogleAuth />} />
+                                                {/* Solana wallet workflow */}
+                                                <Route path="/wallet" element={<Auth />} />
                                                 <Route path="/tree" element={<TreeAuth />} />
                                             </Routes>
                                         </Router>

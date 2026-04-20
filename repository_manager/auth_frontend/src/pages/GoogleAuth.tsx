@@ -125,7 +125,7 @@ export default function GoogleAuth() {
           <p>
             The existing wallet-based workflow remains available on the main sign-in page.
           </p>
-          <Link to="/">Go to Solana sign-in</Link>
+          <Link to="/wallet">Go to Solana sign-in</Link>
         </section>
       </div>
     </div>
