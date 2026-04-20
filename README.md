@@ -11,7 +11,6 @@ Think of it as Git-style version control for model evolution: contributors train
 - [What Flair Solves](#what-flair-solves)
 - [Core Principles](#core-principles)
 - [High-Level Architecture](#high-level-architecture)
-- [Workspace Structure](#workspace-structure)
 - [Quick Start](#quick-start)
 - [CLI Workflow At A Glance](#cli-workflow-at-a-glance)
 - [Configuration](#configuration)
