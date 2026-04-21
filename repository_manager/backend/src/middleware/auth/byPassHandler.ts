@@ -11,10 +11,10 @@ export const ByPassAuth: Web3AuthHandlerCreator = (ctx) => async (req, res, next
     // in the bypass handler, before creating a new anonymous account we remove the previous anonymous accounts
 
     // uncomment to delete the anonymous
-    // await prisma.user.delete({where: {wallet: '_anonymous'}});
+    // await prisma.user.delete({where: {principal: '_anonymous'}});
 
     const pubkey = '_anonymous';
-    const userExists = await prisma.user.findUnique({ where: { wallet: pubkey } });
+    const userExists = await prisma.user.findUnique({ where: { principal: pubkey } });
     // create the user only if he does not already exists
     if (!userExists) await createUser(pubkey);
     // after creation we update the user as an anonymous user
@@ -25,10 +25,10 @@ export const ByPassAuth: Web3AuthHandlerCreator = (ctx) => async (req, res, next
 
 // logic to create anonymous users through random public keys, deprecated
 // const prevAnonymousUsers = await prisma.user.findMany({
-//     where: { wallet: { contains: '_anonymous' } }
+//     where: { principal: { contains: '_anonymous' } }
 // });
 // const deletePromises = prevAnonymousUsers.map(user => {
-//     prisma.user.delete({ where: { wallet: user.wallet } });
+//     prisma.user.delete({ where: { principal: user.principal } });
 // });
 // const deletedUsers = await Promise.all(deletePromises);
 // if (!deletedUsers) console.log('Deleted previous anonymous users.')

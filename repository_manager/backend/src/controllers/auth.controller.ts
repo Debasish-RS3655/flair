@@ -88,9 +88,9 @@ export const linkWallet = async (req: Request, res: Response) => {
         }
 
         await linkWalletIdentityToUser(userId, walletPrincipal);
-        res.status(200).json({ success: true, data: { wallet: walletPrincipal } });
+        res.status(200).json({ success: true, data: { principal: walletPrincipal } });
     } catch (err: any) {
-        const message = err?.message || 'Failed to link wallet.';
+        const message = err?.message || 'Failed to link principal.';
         if (message.includes('already linked to another account')) {
             res.status(409).json({ success: false, error: message });
             return;

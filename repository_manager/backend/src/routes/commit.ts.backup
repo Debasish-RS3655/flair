@@ -762,7 +762,7 @@ commitRouter.post('/create/finalize', async (req, res) => {
         }
 
         const commitHash = uuidV4();
-        const committer = await prisma.user.findFirst({ where: { wallet: pk } });
+        const committer = await prisma.user.findFirst({ where: { principal: pk } });
         if (!committer) {
             res.status(401).json({ error: { message: 'User not found.' } });
             return;

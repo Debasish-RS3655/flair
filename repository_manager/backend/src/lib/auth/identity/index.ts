@@ -31,11 +31,11 @@ export async function ensureGoogleIdentityForSubject(googleSubject: string, prof
     const principal = `${GOOGLE_PRINCIPAL_PREFIX}${googleSubject}`;
 
     const user = await prisma.user.findUnique({
-        where: { wallet: principal },
+        where: { principal },
         select: { id: true }
     }) ?? await prisma.user.create({
         data: {
-            wallet: principal,
+            principal,
             metadata: {
                 set: {
                     email: profile?.email,
@@ -72,7 +72,7 @@ export async function ensureGoogleIdentityForSubject(googleSubject: string, prof
 
 export async function ensureWalletIdentityForWalletPrincipal(walletPrincipal: string): Promise<void> {
     const user = await prisma.user.findUnique({
-        where: { wallet: walletPrincipal },
+        where: { principal: walletPrincipal },
         select: { id: true }
     }) ?? await createUser(walletPrincipal);
 
@@ -147,7 +147,7 @@ export async function resolveUserIdFromPrincipal(principal: string): Promise<str
         return googleIdentity?.userId ?? null;
     }
 
-    // Wallet principal path: support both identity table and legacy user.wallet.
+    // Wallet principal path: support both identity table and legacy user.principal.
     if (authIdentity) {
         const walletIdentity = await authIdentity.findUnique({
             where: {
@@ -162,7 +162,7 @@ export async function resolveUserIdFromPrincipal(principal: string): Promise<str
     }
 
     const user = await prisma.user.findUnique({
-        where: { wallet: principal },
+        where: { principal },
         select: { id: true }
     });
     return user?.id ?? null;
