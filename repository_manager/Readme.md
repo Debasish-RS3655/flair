@@ -2,6 +2,27 @@
 
 Backend service for managing machine learning repositories on Solana blockchain.
 
+## Backend Overview
+
+The backend is an Express + TypeScript API built around three core ideas:
+
+1. Authentication is wallet-first, but Google OAuth2 is now supported for session creation.
+2. Repository, branch, commit, and shared-folder data are stored behind Prisma-backed controllers and then pushed to IPFS, NFT metadata, or on-chain flows when needed.
+3. Privileged operations such as Merkle tree creation and backend-wallet signing are isolated behind extra auth checks and localhost restrictions.
+
+### Current Route Map
+
+The active Express mount points in the code are:
+
+- `GET /` and `GET /health` for service status
+- `/auth` for Solana SIWS, Google sign-in, and wallet linking
+- `/repo` for repository, branch, commit, and base-model operations
+- `/user` for profile and account management
+- `/tree` for Merkle-tree operations
+- `/systemWallet` for admin wallet signing
+
+The routes below are organized by feature. If you are reading older examples that mention `/repository`, the codebase currently mounts that router under `/repo`. Google sessions use `Authorization: Bearer <sessionToken>`, while wallet-authenticated requests still use the Solana signature-based headers handled by the auth middleware.
+
 ## Installation
 
 Run the following command to install dependencies:
@@ -43,6 +64,19 @@ npm run dev
 ## Authentication
 
 Authorization using Phantom wallet and Sign-In with Solana (SIWS).
+
+Authentication is layered:
+
+- Solana wallets use SIWS or the universal signed-message format.
+- Google sign-in exchanges a Google `idToken` for an internal session JWT.
+- Some routes accept a linked wallet principal through the authenticated Google session.
+
+### Authentication Flow
+
+1. The client requests a sign-in payload from the backend.
+2. The user signs the payload with their wallet, or provides a Google `idToken`.
+3. The backend verifies the signature or token, creates or resolves the user identity, and issues the appropriate session state.
+4. Protected routes then use `Authorization` headers to resolve the active principal.
 
 ### Get Sign-In Message
 
@@ -111,15 +145,82 @@ After successful authentication, include the wallet address in subsequent reques
 Authorization: <wallet-address>
 ```
 
+**Request Shape Notes**:
+- `{ "token": "wallet-public-key.signed-message.signature" }` is the universal first-time wallet flow.
+- `{ "input": ..., "output": ... }` is the SIWS payload flow used by Phantom and other wallet providers.
+
+### Google Sign-In
+
+**Endpoint**: `POST /auth/signin/google`
+
+**Description**: Verifies a Google ID token, creates or resolves the Google-backed principal, and returns an internal session JWT.
+
+**Request Body**:
+```json
+{
+    "idToken": "google-id-token"
+}
+```
+
+**Success Response** (200 OK):
+```json
+{
+    "success": true,
+    "data": {
+        "sessionToken": "jwt-session-token",
+        "principal": "google:google-subject-id",
+        "userId": "682186025f72b9e61673a468"
+    }
+}
+```
+
+**How it is used**:
+- Send the returned token as `Authorization: Bearer <sessionToken>` on protected routes.
+- The token is verified by the backend using `SESSION_JWT_SECRET`.
+
+### Link a Wallet to a Google Session
+
+**Endpoint**: `POST /auth/link/wallet`
+
+**Description**: Attaches a Solana wallet principal to the currently authenticated user account.
+
+**Headers**:
+```
+Authorization: Bearer <sessionToken>
+```
+
+**Request Body**:
+```json
+{
+    "token": "wallet-public-key.signed-message.signature"
+}
+```
+
+**Success Response** (200 OK):
+```json
+{
+    "success": true,
+    "data": {
+        "principal": "your-wallet-address"
+    }
+}
+```
+
+**Notes**:
+- This route is meant for account linking, not initial Google sign-in.
+- It lets a Google-authenticated user attach a Solana wallet for later repo or NFT actions.
+
 ---
 
 ## Repository Management
 
 CRUD operations for Flair repositories.
 
+These routes live under `/repo` in the backend. Most of them are guarded by the auth middleware so the backend can resolve the current principal before touching repository state.
+
 ### Create Repository
 
-**Endpoint**: `POST /repository/create`
+**Endpoint**: `POST /repo/create`
 
 **Description**: Creates a new Flair repository.
 
@@ -164,7 +265,7 @@ Authorization: <wallet-address>
 
 ### View All Repositories
 
-**Endpoint**: `GET /repository/all`
+**Endpoint**: `GET /repo`
 
 **Description**: Fetches all repositories.
 
@@ -189,7 +290,7 @@ Authorization: <wallet-address>
 
 ### View Repository by Hash
 
-**Endpoint**: `GET /repository/hash/:repoHash`
+**Endpoint**: `GET /repo/hash/:repoHash`
 
 **Description**: Fetches a specific repository by its hash.
 
@@ -198,7 +299,7 @@ Authorization: <wallet-address>
 
 ### View Repository by Name
 
-**Endpoint**: `GET /repository/name/:repoName`
+**Endpoint**: `GET /repo/name/:name`
 
 **Description**: Fetches a specific repository by its name.
 
@@ -207,7 +308,7 @@ Authorization: <wallet-address>
 
 ### Update Repository
 
-**Endpoint**: `PUT /repository/update/:repoHash`
+**Endpoint**: `PATCH /repo/hash/:repoHash/update`
 
 **Description**: Updates repository metadata.
 
@@ -228,7 +329,7 @@ Authorization: <wallet-address>
 
 ### Delete Repository
 
-**Endpoint**: `DELETE /repository/delete/:repoHash`
+**Endpoint**: `DELETE /repo/hash/:repoHash/delete`
 
 **Description**: Deletes a repository.
 
@@ -242,7 +343,7 @@ Authorization: <wallet-address>
 
 ### Upload Base Model
 
-**Endpoint**: `POST /repository/basemodel/upload/:repoHash`
+**Endpoint**: `POST /repo/hash/:repoHash/basemodel/upload`
 
 **Description**: Uploads a base model file to the repository.
 
@@ -257,7 +358,7 @@ Content-Type: multipart/form-data
 
 ### Delete Base Model
 
-**Endpoint**: `DELETE /repository/basemodel/delete/:repoHash`
+**Endpoint**: `DELETE /repo/hash/:repoHash/basemodel/delete`
 
 **Description**: Deletes the base model from a repository.
 
@@ -268,7 +369,7 @@ Authorization: <wallet-address>
 
 ### Get Base Model URL
 
-**Endpoint**: `GET /repository/basemodel/url/:repoHash`
+**Endpoint**: `GET /repo/hash/:repoHash/basemodel/fetch_url`
 
 **Description**: Gets the IPFS URL for downloading the base model.
 
@@ -284,7 +385,7 @@ Authorization: <wallet-address>
 
 ### Convert Repository to NFT Collection
 
-**Endpoint**: `POST /repository/convert/:repoHash`
+**Endpoint**: `POST /repo/hash/:repoHash/create_collection`
 
 **Description**: Converts the repository into an NFT collection so that commit NFTs can be minted.
 
