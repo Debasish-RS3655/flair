@@ -4,7 +4,7 @@ Flair is a local-first repository system for collaborative, privacy-preserving m
 
 Think of it as Git-style version control for model evolution: contributors train locally, publish model updates as commits, and keep a verifiable history without uploading raw datasets.
 
-![Flair Bot](assets/flairbot.png)
+![Flair Bot](resources/assets/flairbot.png)
 
 ## Table Of Contents
 
