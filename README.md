@@ -4,7 +4,8 @@ Flair is a local-first repository system for collaborative trained model version
 
 Think of it as Git-style version control for trained model states: contributors train in their own environments, publish updates as commits, and reconstruct, branch, merge, and revert model evolution deterministically.
 
-![Flair Bot](resources/assets/flairbot.png)
+![Flair Hub](resources/assets/sc1.png)
+![Flair CLI Docs](resources/assets/sc2.png)
 
 ## Table Of Contents
 
