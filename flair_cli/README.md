@@ -139,6 +139,7 @@ flair diff 9f2c... b71e...
 ## Federated Merge Readiness
 ##   Architecture compatible: ✓
 ##   Parameter dimensions compatible: ✓
+##   Class space compatible: ✓
 ##   Update magnitude: moderate
 ##   Recommended merge weight: 0.18
 ```
@@ -310,8 +311,13 @@ This section is designed for federated learning workflows:
 
 - **Architecture compatible**: ✓ if `architectureHash` matches
 - **Parameter dimensions compatible**: ✓ if all shapes match
+- **Class space compatible**: ✓ only when every contributor trains against the same fixed label set and output layer size
 - **Update magnitude**: `small` (mean delta < 0.01), `moderate` (0.01–0.1), or `large` (> 0.1)
 - **Recommended merge weight**: Heuristic weight (0–1) for how much to blend this update into the global model, based on cosine similarity and magnitude
+
+Important limitation:
+- Flair cannot safely merge models trained on different classes if that changes the output layer or label space.
+- If contributors train with different class sets, treat those commits as separate lineages and start a new CHECKPOINT or branch.
 
 Example interpretation:
 - A `small` update with high similarity (0.99+) → blend weight ~0.15

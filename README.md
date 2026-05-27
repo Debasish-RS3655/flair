@@ -1,8 +1,8 @@
 # Flair
 
-Flair is a local-first repository system for collaborative, privacy-preserving machine learning.
+Flair is a local-first repository system for collaborative trained model version control.
 
-Think of it as Git-style version control for model evolution: contributors train locally, publish model updates as commits, and keep a verifiable history without uploading raw datasets.
+Think of it as Git-style version control for trained model states: contributors train in their own environments, publish updates as commits, and reconstruct, branch, merge, and revert model evolution deterministically.
 
 ![Flair Bot](resources/assets/flairbot.png)
 
@@ -30,16 +30,19 @@ Flair is built for teams where:
 - multiple contributors train the same model asynchronously
 - contribution provenance and auditability matter
 - model evolution should be reproducible and reviewable
+- trained model states should be reconstructable, branchable, and revertible
 
-Instead of sharing datasets, contributors share model artifacts and metadata as immutable commits.
+Instead of exchanging datasets, contributors exchange versioned model states and metadata while preserving deterministic history.
 
 ## Core Principles
 
 - Local-first training: training runs in contributor-controlled environments.
 - No raw data upload: only model artifacts, metadata, and optional proofs are exchanged.
-- Git-like workflow: repositories, branches, commits, history, revert/reset, and diff.
+- Git-style model evolution: repositories, commits, branches, merge, diff, reconstruction, and rollback.
 - Verifiability: optional zkML proof flow for validating training claims.
+- Merge compatibility requires a shared class space and matching output-layer dimensions across contributors.
 - Provenance: commit lineage and contribution history are explicit and queryable.
+- Deterministic reconstruction: any commit can reconstruct the exact corresponding model state.
 
 ## High-Level Architecture
 
@@ -54,7 +57,7 @@ Flair Repository Manager Backend
   -> Commit ingestion + branch state
   -> Optional proof verification + provenance services
 
-Aggregation / Training Orchestration (e.g., Flower-style workflows)
+Optional Aggregation / Collaboration Layer (e.g., Flower-style workflows)
   -> Merge asynchronous updates
   -> Produce next global model state
 ```
@@ -134,12 +137,12 @@ Default values in CLI config include:
 
 If your backend/frontend run on different ports, update CLI config accordingly.
 
-## Privacy And Security Model
+## Data And Trust Model
 
 - Raw datasets are not uploaded through Flair workflows.
 - Shared artifacts are model-related files and commit metadata.
 - Session/auth tokens are stored locally (`~/.flair/session.json`), never private keys.
-- Optional zkML support enables proof-based validation of training constraints without exposing raw data.
+- Optional zkML support enables optional verification of model provenance without exposing raw data.
 
 ## Current Status
 
@@ -148,6 +151,8 @@ Flair is an early-stage, research-oriented project.
 - APIs and data contracts may evolve quickly.
 - Some modules are experimental.
 - Backward compatibility is not guaranteed between early versions.
+
+Flair currently prioritizes local reproducibility and commit integrity over hosted collaboration features.
 
 Recommended use today: experimentation, protocol design, and developer research.
 
@@ -180,3 +185,5 @@ Contribution expectations:
 Flair is infrastructure for collaborative ML development and research.
 
 It is not a model deployment platform, not a clinical or diagnostic system, and not a substitute for independent validation in real-world domains.
+
+Flair version-controls model artifacts and training history but does not guarantee model correctness or training validity.

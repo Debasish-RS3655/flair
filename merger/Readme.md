@@ -37,6 +37,11 @@ Flair keeps the same learning rhythm as asynchronous federated learning, but rec
 
 In effect, each merge commit acts like the next global model in federated learning rounds, while preserving full commit history.
 
+Merge limitation:
+
+- Flair can only aggregate sibling commits when they share the same model architecture, parameter layout, and class space.
+- If two models were trained on different classes and that produces a different output layer shape, the merger must skip the group and treat them as separate lineages.
+
 ## Shared Folder Architecture in Backend
 
 The backend shared-folder routes provide ephemeral coordination storage per branch and committer wallet.
