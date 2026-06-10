@@ -1,8 +1,10 @@
 # Flair
 
-Flair is a local-first repository system for collaborative trained model version control.
+Flair is a local-first repository system for collaborative machine learning development.
 
-Think of it as Git-style version control for trained model states: contributors train in their own environments, publish updates as commits, and reconstruct, branch, merge, and revert model evolution deterministically.
+It enables researchers and organizations to track, preserve, and collaboratively evolve trained machine learning models through repositories, commits, branches, merges, and reproducible model history.
+
+Think of it as Git styled version control for model evolution: contributors train in their own environments, publish updates as commits, and reconstruct, branch, merge, compare, and revert model states deterministically.
 
 ![Flair Hub](resources/assets/sc1.png)
 ![Flair CLI Docs](resources/assets/sc2.png)
@@ -23,6 +25,10 @@ Think of it as Git-style version control for trained model states: contributors 
 
 ## What Flair Solves
 
+As machine learning projects become increasingly collaborative, understanding how models evolve over time becomes increasingly difficult.
+
+Researchers can often explain how code evolved throughout a project, but understanding how trained models evolved, which changes improved performance, and how contributions accumulated remains significantly harder.
+
 Traditional ML collaboration often assumes centralized data and centralized training.
 
 Flair is built for teams where:
@@ -39,11 +45,12 @@ Instead of exchanging datasets, contributors exchange versioned model states and
 
 - Local-first training: training runs in contributor-controlled environments.
 - No raw data upload: only model artifacts, metadata, and optional proofs are exchanged.
-- Git-style model evolution: repositories, commits, branches, merge, diff, reconstruction, and rollback.
+- Model evolution workflows: repositories, commits, branches, merge, diff, reconstruction, and rollback for trained models.
 - Verifiability: optional zkML proof flow for validating training claims.
 - Merge compatibility requires a shared class space and matching output-layer dimensions across contributors.
 - Provenance: commit lineage and contribution history are explicit and queryable.
 - Deterministic reconstruction: any commit can reconstruct the exact corresponding model state.
+- Cumulative progress: preserve and build upon previous model improvements rather than repeatedly recreating them.
 
 ## High-Level Architecture
 
@@ -62,6 +69,10 @@ Optional Aggregation / Collaboration Layer (e.g., Flower-style workflows)
   -> Merge asynchronous updates
   -> Produce next global model state
 ```
+
+The objective is not simply to store model files.
+
+The objective is to preserve model evolution, contribution history, and reproducible progress across researchers, teams, and institutions.
 
 ## Quick Start
 
@@ -141,7 +152,7 @@ If your backend/frontend run on different ports, update CLI config accordingly.
 ## Data And Trust Model
 
 - Raw datasets are not uploaded through Flair workflows.
-- Shared artifacts are model-related files and commit metadata.
+- Shared artifacts include model parameters, commit metadata, metrics, provenance information, and optional verification artifacts.
 - Session/auth tokens are stored locally (`~/.flair/session.json`), never private keys.
 - Optional zkML support enables optional verification of model provenance without exposing raw data.
 
@@ -156,6 +167,8 @@ Flair is an early-stage, research-oriented project.
 Flair currently prioritizes local reproducibility and commit integrity over hosted collaboration features.
 
 Recommended use today: experimentation, protocol design, and developer research.
+
+Flair currently focuses on model evolution infrastructure rather than model training, experiment orchestration, or model deployment.
 
 ## Contributing
 
@@ -183,7 +196,7 @@ Contribution expectations:
 
 ## Disclaimer
 
-Flair is infrastructure for collaborative ML development and research.
+Flair is a tool for collaborative machine learning development, model evolution, and reproducible AI research.
 
 It is not a model deployment platform, not a clinical or diagnostic system, and not a substitute for independent validation in real-world domains.
 
