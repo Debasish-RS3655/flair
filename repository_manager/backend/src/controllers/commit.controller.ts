@@ -8,6 +8,9 @@ import config from '../../config.js';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidV4 } from 'uuid';
+import { createHash } from 'crypto';
+import nacl from 'tweetnacl';
+import bs58 from 'bs58';
 import { ZKMLProofCreateObj } from '../lib/types/zkmlproof.js';
 import { convertCommitToNft } from '../lib/nft/nft.js';
 import { umi } from '../lib/nft/umi.js';
@@ -18,6 +21,186 @@ const COMMIT_JWT_SECRET = process.env.COMMIT_JWT_SECRET || 'another-super-secret
 const SESSION_EXPIRY_MINUTES = config.commit.session.expiryMinutes || 10;
 const BLOCK_DURATION_MINUTES = config.commit.session.blockDurationMinutes || 2;
 const GENESIS_COMMIT_HASH = config.commit.genesis.hash || '_GENESIS_COMMIT_';
+
+type CommitTypeNormalized = 'CHECKPOINT' | 'DELTA';
+
+type CanonicalCommitPayload = {
+    sessionJti: string;
+    signedAt: string;
+    paramsIpfsId: string;
+    paramHash: string;
+    previousCommitHash: string;
+    architecture: string;
+    architectureHash: string | null;
+    commitType: CommitTypeNormalized;
+    message: string;
+    metrics: Record<string, unknown>;
+};
+
+function normalizeJsonValue(input: unknown): unknown {
+    if (Array.isArray(input)) {
+        return input.map((item) => normalizeJsonValue(item));
+    }
+
+    if (input && typeof input === 'object') {
+        const record = input as Record<string, unknown>;
+        const sortedKeys = Object.keys(record).sort();
+        const normalized: Record<string, unknown> = {};
+        for (const key of sortedKeys) {
+            normalized[key] = normalizeJsonValue(record[key]);
+        }
+        return normalized;
+    }
+
+    return input;
+}
+
+function buildCanonicalCommitPayload(payload: CanonicalCommitPayload): CanonicalCommitPayload {
+    return {
+        sessionJti: payload.sessionJti,
+        signedAt: payload.signedAt,
+        paramsIpfsId: payload.paramsIpfsId,
+        paramHash: payload.paramHash,
+        previousCommitHash: payload.previousCommitHash,
+        architecture: payload.architecture,
+        architectureHash: payload.architectureHash,
+        commitType: payload.commitType,
+        message: payload.message,
+        metrics: normalizeJsonValue(payload.metrics) as Record<string, unknown>
+    };
+}
+
+function canonicalizeCommitPayload(payload: CanonicalCommitPayload): string {
+    const canonicalPayload = buildCanonicalCommitPayload(payload);
+    return JSON.stringify(canonicalPayload);
+}
+
+function computeCommitHash(payload: CanonicalCommitPayload): string {
+    const canonicalJson = canonicalizeCommitPayload(payload);
+    const hash = createHash('sha256')
+        .update(canonicalJson)
+        .update('|')
+        .update(payload.previousCommitHash)
+        .digest('hex');
+    return hash;
+}
+
+interface IdentityPublicKeyInfo {
+    publicKeyBytes: Uint8Array;  // Solana public key bytes for ED25519 verification
+    keyType: 'ed25519';
+    solanaAddress: string;       // base58-encoded Solana address
+}
+
+async function getUserPublicKeyInfo(pk: string): Promise<IdentityPublicKeyInfo | null> {
+    try {
+        // Find the user by principal
+        const user = await prisma.user.findUnique({
+            where: { principal: pk }
+        });
+        
+        if (!user) {
+            console.warn(`User with principal ${pk} not found`);
+            return null;
+        }
+
+        // Find the associated auth identity to determine provider
+        const authIdentity = await prisma.authIdentity.findFirst({
+            where: {
+                userId: user.id
+            }
+        });
+        
+        if (!authIdentity) {
+            console.warn(`No auth identity found for user ${user.id}`);
+            return null;
+        }
+
+        // Only WALLET users can sign commits (Solana wallets)
+        // Google auth users cannot create signatures
+        if (authIdentity.provider !== 'WALLET') {
+            console.warn(`User authenticated via ${authIdentity.provider} (subject: ${authIdentity.subject}) cannot sign commits. Only WALLET provider can sign.`);
+            return null;
+        }
+
+        // For WALLET users, the principal IS the Solana public key in base58 format
+        // Decode base58 to get the public key bytes for ED25519 verification
+        try {
+            const publicKeyBytes = bs58.decode(pk);
+            return {
+                publicKeyBytes,
+                keyType: 'ed25519',
+                solanaAddress: pk
+            };
+        } catch (decodeErr) {
+            console.error(`Failed to decode Solana address ${pk}:`, decodeErr);
+            return null;
+        }
+    } catch (err) {
+        console.error('Error fetching user public key:', err);
+        return null;
+    }
+}
+
+function verifySignature(canonicalPayload: string, signatureHex: string, publicKeyInfo: IdentityPublicKeyInfo): boolean {
+    try {
+        // Convert payload string to bytes
+        const payloadBytes = Buffer.from(canonicalPayload, 'utf-8');
+        
+        // Convert signature from hex to bytes
+        const signatureBytes = Buffer.from(signatureHex, 'hex');
+        
+        // Verify ED25519 signature using tweetnacl
+        // nacl.sign.detached.verify returns true if signature is valid
+        const isValid = nacl.sign.detached.verify(
+            payloadBytes,
+            signatureBytes,
+            publicKeyInfo.publicKeyBytes
+        );
+        
+        return isValid;
+    } catch (err) {
+        console.error('Error verifying signature:', err);
+        return false;
+    }
+}
+
+async function verifyCommitChainIntegrity(parentCommitHash: string, branchId: string): Promise<{ valid: boolean; error?: string }> {
+    /**
+     * Merkle tree chain verification: ensure the parent commit exists and is properly linked.
+     * This prevents orphaned or broken chains.
+     */
+    
+    // Genesis is always valid
+    if (parentCommitHash === GENESIS_COMMIT_HASH) {
+        return { valid: true };
+    }
+    
+    try {
+        // Verify parent commit exists in the same branch
+        const parentCommit = await prisma.commit.findFirst({
+            where: {
+                commitHash: parentCommitHash,
+                branchId: branchId,
+                isDeleted: false
+            }
+        });
+        
+        if (!parentCommit) {
+            return {
+                valid: false,
+                error: `Parent commit ${parentCommitHash.substring(0, 16)}... not found in this branch or is deleted.`
+            };
+        }
+        
+        return { valid: true };
+    } catch (err) {
+        console.error('Error verifying commit chain:', err);
+        return {
+            valid: false,
+            error: 'Failed to verify commit chain integrity.'
+        };
+    }
+}
 
 // Helper: Block user for 2 minutes
 async function blockUser(pk: string) {
@@ -655,13 +838,15 @@ export const finalizeCommit = async (req: Request, res: Response) => {
         const { branchId, repoId } = req;
         const {
             message,
-            commitHash,         // commit hash will be created in the cli now
+            commitHash,         // commit hash will be computed in the server side (client value ignored)
             paramHash,
             architecture,
             metrics,
             initiateToken,
             zkmlReceiptToken,
-            paramsReceiptToken
+            paramsReceiptToken,
+            commitSignature,     // signature of canonical commit payload
+            signedAt
         } = req.body;
 
         if (!initiateToken) {
@@ -758,6 +943,28 @@ export const finalizeCommit = async (req: Request, res: Response) => {
             return;
         }
 
+        if (!signedAt || typeof signedAt !== 'string') {
+            res.status(400).json({ error: { message: 'signedAt is required for replay protection.' } });
+            return;
+        }
+
+        const signedAtDate = new Date(signedAt);
+        if (Number.isNaN(signedAtDate.getTime())) {
+            res.status(400).json({ error: { message: 'signedAt must be a valid ISO-8601 timestamp.' } });
+            return;
+        }
+
+        const now = new Date();
+        const allowedSkewMs = 2 * 60 * 1000;
+        const sessionCreatedAtMs = session.createdAt.getTime();
+        const sessionExpiresAtMs = session.expiresAt ? session.expiresAt.getTime() : now.getTime() + allowedSkewMs;
+
+        if (signedAtDate.getTime() < sessionCreatedAtMs - allowedSkewMs || signedAtDate.getTime() > sessionExpiresAtMs + allowedSkewMs || signedAtDate.getTime() > now.getTime() + allowedSkewMs) {
+            await recordSessionError(sessionId, pk);
+            res.status(403).json({ error: { message: 'Commit signature is stale or outside the allowed replay window.' } });
+            return;
+        }
+
         const repo = await prisma.repository.findUnique({ where: { id: repoId }, include: { baseModel: true } });
         if (!repo?.baseModelId) {
             res.status(400).json({ error: { message: 'Base model not uploaded. Cannot create commit.' } });
@@ -778,20 +985,57 @@ export const finalizeCommit = async (req: Request, res: Response) => {
             return;
         }
 
-        if (!commitHash) {
-            res.status(400).json({ error: { message: 'commitHash is required.' } });
-            return;
-        }
-
-        // Validate commitHash is a valid UUIDv4
-        const uuidv4Regex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-        if (!uuidv4Regex.test(commitHash)) {
-            res.status(400).json({ error: { message: 'commitHash must be a valid UUIDv4 format.' } });
-            return;
-        }
-
+        // Compute authoritative commitHash from canonical payload and parent commit hash.
+        // Note: client-supplied commitHash is ignored; server is authoritative.
         const commitTypeRaw = (req.body?.commitType as string | undefined)?.toUpperCase();
         const commitType = commitTypeRaw === 'CHECKPOINT' ? 'CHECKPOINT' : 'DELTA';
+
+        const parentCommitHash = sessionJwt.parentCommitHash as string;
+
+        const canonicalPayload: CanonicalCommitPayload = {
+            sessionJti: sessionJwt.jti as string,
+            signedAt,
+            paramsIpfsId: paramsReceiptJwt.paramsIpfsId,
+            paramHash,
+            previousCommitHash: parentCommitHash,
+            architecture,
+            architectureHash: null,
+            commitType,
+            message,
+            metrics: (metrics as Record<string, unknown>) || {}
+        };
+
+        const computedCommitHash = computeCommitHash(canonicalPayload);
+
+        if (session.jti !== sessionJwt.jti) {
+            await recordSessionError(sessionId, pk);
+            res.status(403).json({ error: { message: 'Session nonce mismatch. Replay protection failed.' } });
+            return;
+        }
+
+        // Verify commit signature
+        if (!commitSignature) {
+            res.status(400).json({ error: { message: 'Commit signature is required.' } });
+            return;
+        }
+
+        const publicKeyInfo = await getUserPublicKeyInfo(pk);
+        if (!publicKeyInfo) {
+            res.status(401).json({ 
+                error: { 
+                    message: 'User cannot sign commits. Only WALLET-authenticated users (Solana) can create signed commits.' 
+                } 
+            });
+            return;
+        }
+
+        const canonicalPayloadStr = canonicalizeCommitPayload(canonicalPayload);
+        const isSignatureValid = verifySignature(canonicalPayloadStr, commitSignature, publicKeyInfo);
+        if (!isSignatureValid) {
+            await recordSessionError(sessionId, pk);
+            res.status(403).json({ error: { message: 'Commit signature verification failed. Signature does not match canonical payload.' } });
+            return;
+        }
 
         const committerId = await resolveUserIdFromPrincipal(pk);
         if (!committerId) {
@@ -805,12 +1049,22 @@ export const finalizeCommit = async (req: Request, res: Response) => {
             return;
         }
 
-        // Parent commit hash was validated during initiation
-        const parentCommitHash = sessionJwt.parentCommitHash as string;
+        // Verify commit chain integrity: parent commit must exist in this branch
+        const chainVerification = await verifyCommitChainIntegrity(parentCommitHash, branchId);
+        if (!chainVerification.valid) {
+            await recordSessionError(sessionId, pk);
+            res.status(409).json({ 
+                error: { 
+                    message: `Commit chain verification failed: ${chainVerification.error}`,
+                    code: 'CHAIN_INTEGRITY_ERROR'
+                } 
+            });
+            return;
+        }
 
-        // Check commitHash uniqueness
-        if (await prisma.commit.count({ where: { commitHash } })) {
-            res.status(409).json({ error: { message: 'Commit hash already exists. Must use a unique UUIDv4.' } });
+        // Check commitHash uniqueness (using computed hash)
+        if (await prisma.commit.count({ where: { commitHash: computedCommitHash } })) {
+            res.status(409).json({ error: { message: 'Commit with same canonical payload already exists.' } });
             return;
         }
 
@@ -903,7 +1157,7 @@ export const finalizeCommit = async (req: Request, res: Response) => {
                     message,
                     metrics: metricsFinal,
                     branchId: targetBranchId,
-                    commitHash,
+                    commitHash: computedCommitHash,
                     previousCommitHash: parentCommitHash,
                     commitType,
                     status: 'MERGED',               // the status is set to MERGED directly for simplicity for now

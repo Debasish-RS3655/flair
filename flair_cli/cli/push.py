@@ -10,11 +10,20 @@ import json
 import httpx
 import hashlib
 import shutil
+import os
+from datetime import datetime, timezone
 
 from ..api import client as api_client
 from ..api.utils import _base_url, _client_with_auth
 from ..core import session
 from .utils.local_commits import _get_all_local_commits, _get_flair_dir, _get_head_info, _get_latest_local_commit
+from .utils.commit_signing import (
+    build_canonical_payload,
+    extract_jti_from_jwt,
+    sign_canonical_payload,
+    get_solana_keypair_from_file,
+    verify_keypair_matches_address,
+)
 
 app = typer.Typer()
 console = Console()
@@ -50,6 +59,35 @@ def _is_commit_complete(commit_data: dict, commit_dir: Path) -> bool:
         return False
     
     return True
+
+
+def _verify_local_commit_chain(commits_to_push: list[tuple]) -> tuple[bool, str]:
+    """
+    Verify merkle tree chain integrity: each commit's previousCommitHash 
+    must match the previous commit in the chain or be genesis.
+    
+    Returns: (is_valid, error_message)
+    """
+    GENESIS_COMMIT_HASH = "_GENESIS_COMMIT_"
+    
+    if not commits_to_push:
+        return True, ""
+    
+    for idx, (commit_data, commit_dir) in enumerate(commits_to_push):
+        commit_hash = commit_data.get("commitHash")
+        previous_hash = commit_data.get("previousCommitHash")
+        
+        if idx == 0:
+            # First commit should reference genesis or nothing
+            if previous_hash and previous_hash != GENESIS_COMMIT_HASH:
+                return False, f"First commit {commit_hash[:16]}... should reference Genesis but references {previous_hash[:16]}..."
+        else:
+            # Subsequent commits should reference the previous commit
+            expected_parent = commits_to_push[idx - 1][0].get("commitHash")
+            if previous_hash != expected_parent:
+                return False, f"Commit {commit_hash[:16]}... previousCommitHash ({previous_hash[:16]}...) does not match parent ({expected_parent[:16]}...)"
+    
+    return True, ""
 
 
 def _get_remote_latest_commit(repo_hash: str, branch_hash: str) -> str | None:
@@ -262,6 +300,15 @@ def push(
             console.print("[dim]Ensure commits have params, ZKP, and are finalized with 'flair commit -m'.[/dim]")
             raise typer.Exit(0)
         
+        # Verify local commit chain integrity (merkle tree)
+        console.print("[dim]Verifying local commit chain integrity...[/dim]")
+        chain_valid, chain_error = _verify_local_commit_chain(commits_to_push)
+        if not chain_valid:
+            console.print(f"[red]✗ Chain integrity check failed: {chain_error}[/red]")
+            console.print(f"[yellow]Cannot push commits with broken chain. Fix and try again.[/yellow]")
+            raise typer.Exit(code=1)
+        console.print("[green]✓ Local chain verified[/green]")
+        
         # Find where to start pushing (after remote head)
         start_index = 0
         if remote_head_hash:
@@ -449,8 +496,58 @@ def push(
             
             console.print(f"[green]✓ Parameters uploaded (hash: {param_hash[:16]}...)[/green]")
             
-            # Step 5: Finalize commit
+            # Step 5: Finalize commit with signature
             console.print("[cyan]Step 5/5: Finalizing commit...[/cyan]")
+            session_jti = extract_jti_from_jwt(initiate_token)
+            if not session_jti:
+                console.print(f"[red]✗ Commit {idx}: Could not extract session nonce from initiate token[/red]")
+                console.print(f"[yellow]Stopping push after {pushed_count} successful commit(s).[/yellow]")
+                raise typer.Exit(code=1)
+            signed_at = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+            
+            # Load user's Solana keypair for signing
+            console.print("[dim]Loading keypair for signature...[/dim]")
+            secret_key_bytes = get_solana_keypair_from_file()
+            if not secret_key_bytes:
+                console.print(f"[red]✗ Commit {idx}: Could not load Solana keypair[/red]")
+                console.print(f"[yellow]Ensure keypair exists at ~/.config/solana/id.json or SOLANA_KEYPAIR env var[/yellow]")
+                console.print(f"[yellow]Stopping push after {pushed_count} successful commit(s).[/yellow]")
+                raise typer.Exit(code=1)
+            
+            # Get the user's wallet address (principal) from session
+            user_principal = os.getenv("FLAIR_WALLET_ADDRESS")
+            if not user_principal:
+                console.print(f"[red]✗ Commit {idx}: User principal not available[/red]")
+                console.print(f"[yellow]Ensure FLAIR_WALLET_ADDRESS is set[/yellow]")
+                raise typer.Exit(code=1)
+            
+            # Verify keypair matches user address (safety check)
+            if not verify_keypair_matches_address(secret_key_bytes, user_principal):
+                console.print(f"[red]✗ Commit {idx}: Keypair does not match user wallet[/red]")
+                console.print(f"[yellow]Keypair public key mismatch with {user_principal}[/yellow]")
+                raise typer.Exit(code=1)
+            
+            # Build canonical payload matching server structure
+            canonical_payload = build_canonical_payload(
+                session_jti=session_jti,
+                signed_at=signed_at,
+                params_ipfs_id=params_upload_data.get("paramsIpfsId", ""),
+                param_hash=param_hash,
+                previous_commit_hash=parent_commit_hash,
+                architecture=framework,
+                commit_type=commit_type,
+                message=message,
+                metrics=commit_metrics,
+            )
+            
+            # Sign the canonical payload
+            commit_signature = sign_canonical_payload(canonical_payload, secret_key_bytes)
+            if not commit_signature:
+                console.print(f"[red]✗ Commit {idx}: Failed to sign commit[/red]")
+                console.print(f"[yellow]Stopping push after {pushed_count} successful commit(s).[/yellow]")
+                raise typer.Exit(code=1)
+            
+            console.print(f"[dim]Commit signed (signature: {commit_signature[:16]}...)[/dim]")
             
             with _client_with_auth() as client:
                 response = client.post(
@@ -460,15 +557,18 @@ def push(
                         "initiateToken": initiate_token,
                         "zkmlReceiptToken": zkml_receipt_token,
                         "paramsReceiptToken": params_receipt_token,
+                        "signedAt": signed_at,
                         "message": message,
                         "architecture": framework,
                         "metrics": commit_metrics,
+                        "commitSignature": commit_signature,
+                        "commitType": commit_type,
                     }
                 )
                 response.raise_for_status()
                 finalize_data = response.json()
             
-            returned_commit_hash = finalize_data.get("commitHash")
+            returned_commit_hash = finalize_data.get("data", {}).get("commitHash")
             if not returned_commit_hash:
                 console.print(f"[red]✗ Commit {idx}: Finalization failed[/red]")
                 console.print(f"[yellow]Stopping push after {pushed_count} successful commit(s).[/yellow]")
@@ -476,7 +576,19 @@ def push(
             
             console.print(f"[bold green]✓ Commit {idx} created successfully![/bold green]")
             console.print(f"  [dim]Hash: {returned_commit_hash[:16]}...[/dim]")
-            console.print(f"  [dim]Type: {commit_type}[/dim]\n")
+            console.print(f"  [dim]Type: {commit_type}[/dim]")
+            
+            # Update local commit.json with server-returned authoritative hash
+            # This ensures the local hash matches the server's canonical commit hash
+            commit_data["commitHash"] = returned_commit_hash
+            commit_file = commit_dir / "commit.json"
+            try:
+                with open(commit_file, 'w') as f:
+                    json.dump(commit_data, f, indent=2)
+                console.print(f"  [dim]Local commit updated with server hash[/dim]\n")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Failed to update local commit.json: {e}[/yellow]")
+                console.print(f"[yellow]Server hash and local hash may differ. Consider re-pushing.[/yellow]\n")
             
             # Update parent for next commit
             parent_commit_hash = returned_commit_hash
