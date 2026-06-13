@@ -71,6 +71,7 @@ function buildCanonicalCommitPayload(payload: CanonicalCommitPayload): Canonical
 }
 
 function canonicalizeCommitPayload(payload: CanonicalCommitPayload): string {
+    // SSH-MIGRATION: must byte-match CLI canonicalize_payload() before any signer swap.
     const canonicalPayload = buildCanonicalCommitPayload(payload);
     return JSON.stringify(canonicalPayload);
 }
@@ -85,12 +86,16 @@ function computeCommitHash(payload: CanonicalCommitPayload): string {
     return hash;
 }
 
+// SSH-MIGRATION: generalize IdentityPublicKeyInfo for SSH public keys (OpenSSH format,
+// fingerprint, key type rsa/ed25519/ecdsa) instead of Solana base58 addresses.
 interface IdentityPublicKeyInfo {
     publicKeyBytes: Uint8Array;  // Solana public key bytes for ED25519 verification
     keyType: 'ed25519';
     solanaAddress: string;       // base58-encoded Solana address
 }
 
+// SSH-MIGRATION: resolve commit-signing identity from SSH auth provider, not WALLET/Solana only.
+// Google-linked SSH keys and provider selection logic will need updating here.
 async function getUserPublicKeyInfo(pk: string): Promise<IdentityPublicKeyInfo | null> {
     try {
         // Find the user by principal
@@ -115,6 +120,7 @@ async function getUserPublicKeyInfo(pk: string): Promise<IdentityPublicKeyInfo |
             return null;
         }
 
+        // SSH-MIGRATION: replace WALLET-only gate with SSH (or linked-SSH) provider check.
         // Only WALLET users can sign commits (Solana wallets)
         // Google auth users cannot create signatures
         if (authIdentity.provider !== 'WALLET') {
@@ -122,6 +128,7 @@ async function getUserPublicKeyInfo(pk: string): Promise<IdentityPublicKeyInfo |
             return null;
         }
 
+        // SSH-MIGRATION: load stored SSH public key for principal pk instead of bs58 Solana decode.
         // For WALLET users, the principal IS the Solana public key in base58 format
         // Decode base58 to get the public key bytes for ED25519 verification
         try {
@@ -141,6 +148,9 @@ async function getUserPublicKeyInfo(pk: string): Promise<IdentityPublicKeyInfo |
     }
 }
 
+// SSH-MIGRATION: replace tweetnacl detached ED25519 verify with OpenSSH signature
+// verification (e.g. node:crypto or sshpk). Align canonicalPayload serialization
+// with CLI canonicalize_payload before verifying.
 function verifySignature(canonicalPayload: string, signatureHex: string, publicKeyInfo: IdentityPublicKeyInfo): boolean {
     try {
         // Convert payload string to bytes
@@ -149,6 +159,7 @@ function verifySignature(canonicalPayload: string, signatureHex: string, publicK
         // Convert signature from hex to bytes
         const signatureBytes = Buffer.from(signatureHex, 'hex');
         
+        // SSH-MIGRATION: signatureHex encoding may change (OpenSSH base64 blob vs raw hex).
         // Verify ED25519 signature using tweetnacl
         // nacl.sign.detached.verify returns true if signature is valid
         const isValid = nacl.sign.detached.verify(
@@ -845,7 +856,7 @@ export const finalizeCommit = async (req: Request, res: Response) => {
             initiateToken,
             zkmlReceiptToken,
             paramsReceiptToken,
-            commitSignature,     // signature of canonical commit payload
+            commitSignature,     // SSH-MIGRATION: signature of canonical commit payload (Solana ED25519 today; SSH next)
             signedAt
         } = req.body;
 
@@ -1013,6 +1024,8 @@ export const finalizeCommit = async (req: Request, res: Response) => {
             return;
         }
 
+        // SSH-MIGRATION: commit attestation block — swap Solana verify path for SSH verify;
+        // commitSignature field name/format may change; canonicalPayloadStr must match CLI bytes.
         // Verify commit signature
         if (!commitSignature) {
             res.status(400).json({ error: { message: 'Commit signature is required.' } });

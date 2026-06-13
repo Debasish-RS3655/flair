@@ -17,6 +17,8 @@ from ..api import client as api_client
 from ..api.utils import _base_url, _client_with_auth
 from ..core import session
 from .utils.local_commits import _get_all_local_commits, _get_flair_dir, _get_head_info, _get_latest_local_commit
+# SSH-MIGRATION: replace Solana signing imports (get_solana_keypair_from_file,
+# sign_canonical_payload, verify_keypair_matches_address) with SSH signing utilities.
 from .utils.commit_signing import (
     build_canonical_payload,
     extract_jti_from_jwt,
@@ -504,8 +506,19 @@ def push(
                 console.print(f"[yellow]Stopping push after {pushed_count} successful commit(s).[/yellow]")
                 raise typer.Exit(code=1)
             signed_at = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-            
-            # Load user's Solana keypair for signing
+
+            # Principal used for commit attribution (currently the authenticated wallet address).
+            current_session = session.load_session()
+            if not current_session or not current_session.wallet_address:
+                console.print(f"[red]✗ Commit {idx}: User principal not available[/red]")
+                console.print(f"[yellow]Run 'flair auth login' before pushing commits[/yellow]")
+                console.print(f"[yellow]Stopping push after {pushed_count} successful commit(s).[/yellow]")
+                raise typer.Exit(code=1)
+            user_principal = current_session.wallet_address
+
+            # SSH-MIGRATION: replace the entire Solana keypair block below with SSH signing.
+            # Expected flow: build canonical payload → invoke ssh-agent / ~/.ssh key → sign payload
+            # bytes → return signature string. Do NOT load Solana id.json or local wallet secrets.
             console.print("[dim]Loading keypair for signature...[/dim]")
             secret_key_bytes = get_solana_keypair_from_file()
             if not secret_key_bytes:
@@ -513,21 +526,15 @@ def push(
                 console.print(f"[yellow]Ensure keypair exists at ~/.config/solana/id.json or SOLANA_KEYPAIR env var[/yellow]")
                 console.print(f"[yellow]Stopping push after {pushed_count} successful commit(s).[/yellow]")
                 raise typer.Exit(code=1)
-            
-            # Get the user's wallet address (principal) from session
-            user_principal = os.getenv("FLAIR_WALLET_ADDRESS")
-            if not user_principal:
-                console.print(f"[red]✗ Commit {idx}: User principal not available[/red]")
-                console.print(f"[yellow]Ensure FLAIR_WALLET_ADDRESS is set[/yellow]")
-                raise typer.Exit(code=1)
-            
-            # Verify keypair matches user address (safety check)
+
+            # SSH-MIGRATION: replace verify_keypair_matches_address with SSH public-key
+            # fingerprint check against user_principal (or renamed session.signing_identity).
             if not verify_keypair_matches_address(secret_key_bytes, user_principal):
                 console.print(f"[red]✗ Commit {idx}: Keypair does not match user wallet[/red]")
                 console.print(f"[yellow]Keypair public key mismatch with {user_principal}[/yellow]")
                 raise typer.Exit(code=1)
-            
-            # Build canonical payload matching server structure
+
+            # Build canonical payload matching server structure (keep for SSH signing).
             canonical_payload = build_canonical_payload(
                 session_jti=session_jti,
                 signed_at=signed_at,
@@ -540,7 +547,8 @@ def push(
                 metrics=commit_metrics,
             )
             
-            # Sign the canonical payload
+            # SSH-MIGRATION: replace sign_canonical_payload with SSH signing of
+            # canonicalize_payload(canonical_payload); signature encoding must match backend verifySignature.
             commit_signature = sign_canonical_payload(canonical_payload, secret_key_bytes)
             if not commit_signature:
                 console.print(f"[red]✗ Commit {idx}: Failed to sign commit[/red]")

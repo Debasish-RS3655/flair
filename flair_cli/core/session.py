@@ -17,6 +17,9 @@ SESSION_PATH = Path.home() / ".flair" / "session.json"
 
 class Session(BaseModel):
     token: str
+    # SSH-MIGRATION: wallet_address currently holds the authenticated Solana pubkey from
+    # browser login. May be renamed (e.g. signing_identity / ssh_fingerprint) when auth
+    # and commit signing move to SSH; push.py reads this as the commit principal.
     wallet_address: Optional[str]
     expires_at: Optional[str]  # ISO 8601 datetime string
 

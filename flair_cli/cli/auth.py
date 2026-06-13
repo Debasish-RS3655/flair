@@ -190,6 +190,8 @@ def login(
                 expires_at_str = expires_at.isoformat() + "Z"
                 
                 # Save session with expiration
+                # SSH-MIGRATION: wallet_address currently stores Solana pubkey from browser auth;
+                # rename/extend when login moves to SSH key fingerprint or OpenSSH identity.
                 s = session_mod.Session(
                     token=CallbackHandler.token,
                     wallet_address=CallbackHandler.wallet,

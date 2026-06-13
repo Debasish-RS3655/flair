@@ -1,6 +1,14 @@
 """
-Commit signing utilities for canonical payload construction and ED25519 signing.
-Mirrors server-side canonical payload structure for client-side signature generation.
+Commit signing utilities for canonical payload construction and client-side signing.
+
+SSH-MIGRATION (planned):
+- Keep: normalize_json_value, build_canonical_payload, canonicalize_payload,
+  compute_payload_hash, extract_jti_from_jwt (payload canonicalization is algorithm-agnostic).
+- Replace: get_solana_keypair_from_file, sign_canonical_payload, verify_keypair_matches_address
+  with SSH equivalents (e.g. ssh-agent, ~/.ssh/id_ed25519, OpenSSH signature format).
+- Remove Solana-specific deps (PyNaCl, base58) once SSH signing lands.
+- Align canonicalize_payload key ordering with server before switching algorithms
+  (client uses sort_keys=True; server uses insertion order — must match for any signer).
 """
 from __future__ import annotations
 import json
@@ -61,6 +69,9 @@ def canonicalize_payload(payload: Dict[str, Any]) -> str:
     """
     Convert canonical payload to deterministic JSON string.
     Uses sorted keys and no whitespace for exact server-side matching.
+
+    SSH-MIGRATION: reconcile sort_keys=True here with server canonicalizeCommitPayload
+    (insertion order) so SSH and Solana signers hash/sign identical bytes.
     """
     normalized = normalize_json_value(payload)
     return json.dumps(normalized, separators=(",", ":"), sort_keys=True)
@@ -90,6 +101,8 @@ def extract_jti_from_jwt(token: str) -> Optional[str]:
         return None
 
 
+# SSH-MIGRATION: delete this function; SSH signing must not read Solana id.json or local secrets
+# in the CLI. Use ssh-agent / OpenSSH key paths instead (implementation TBD).
 def get_solana_keypair_from_file(keypair_path: Optional[str] = None) -> Optional[bytes]:
     """
     Load Solana keypair (private key bytes) from file.
@@ -133,6 +146,8 @@ def get_solana_keypair_from_file(keypair_path: Optional[str] = None) -> Optional
     return None
 
 
+# SSH-MIGRATION: replace with sign_canonical_payload_ssh(payload) using OpenSSH/ssh-agent.
+# Output encoding (hex vs base64) must match backend verifySignature after migration.
 def sign_canonical_payload(
     payload: Dict[str, Any],
     secret_key_bytes: bytes
@@ -165,6 +180,7 @@ def sign_canonical_payload(
         return None
 
 
+# SSH-MIGRATION: replace with verify_ssh_key_matches_identity(private_key, principal/fingerprint).
 def verify_keypair_matches_address(secret_key_bytes: bytes, solana_address: str) -> bool:
     """
     Verify that the given keypair's public key matches the Solana address.

@@ -23,6 +23,7 @@ tf2onnx = "^1.15"
 tensorflow = "^2.15"
 torch = "^2.2"
 ezkl = ">=0.4.0"
+# SSH-MIGRATION: remove PyNaCl and base58 once Solana commit signing is replaced by SSH signing.
 PyNaCl = "^1.5"
 base58 = "^2.1"
 
