@@ -41,6 +41,9 @@ def _normalize_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
         "architectureHash",
         "previousArchitectureHash",
         "architectureChanged",
+        "classSpaceHash",
+        "previousClassSpaceHash",
+        "classSpaceChanged",
         "commitType",
     }
     normalized: dict[str, Any] = {}

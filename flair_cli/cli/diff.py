@@ -238,6 +238,10 @@ def extract_metadata_changes(
         "previousArchitectureHash",
         "architectureHash",
         "architectureChanged",
+        "classSpace",
+        "classSpaceHash",
+        "previousClassSpaceHash",
+        "classSpaceChanged",
     }
 
     # These training/runtime fields are not reliably stored in commit metadata
@@ -309,6 +313,7 @@ def extract_metric_changes(
 
 def compute_merge_readiness(
     architecture_compatible: bool,
+    class_space_compatible: bool,
     params_a: Dict[str, np.ndarray],
     params_b: Dict[str, np.ndarray],
     overall_stats: Dict[str, Any],
@@ -327,10 +332,17 @@ def compute_merge_readiness(
     """
     result = {
         "architecture_compatible": architecture_compatible,
+        "class_space_compatible": class_space_compatible,
         "parameter_dimensions_compatible": True,
     }
     
     if not architecture_compatible:
+        result["merge_possible"] = False
+        result["recommended_merge_weight"] = None
+        result["update_magnitude"] = "incompatible"
+        return result
+
+    if not class_space_compatible:
         result["merge_possible"] = False
         result["recommended_merge_weight"] = None
         result["update_magnitude"] = "incompatible"
@@ -393,6 +405,57 @@ def compute_merge_readiness(
     return result
 
 
+def _class_space_from_metadata(metadata: Dict[str, Any]) -> List[str] | None:
+    class_space = metadata.get("classSpace")
+    if isinstance(class_space, list):
+        return [str(item) for item in class_space]
+    return None
+
+
+def compute_class_space_compatibility(
+    metadata_a: Dict[str, Any],
+    metadata_b: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Determine whether class-space contracts are compatible across commits."""
+    class_hash_a = metadata_a.get("classSpaceHash")
+    class_hash_b = metadata_b.get("classSpaceHash")
+    class_space_a = _class_space_from_metadata(metadata_a)
+    class_space_b = _class_space_from_metadata(metadata_b)
+
+    if class_hash_a and class_hash_b:
+        compatible = class_hash_a == class_hash_b
+    elif class_space_a is not None and class_space_b is not None:
+        compatible = class_space_a == class_space_b
+    else:
+        compatible = False
+
+    if compatible:
+        return {
+            "class_space_compatible": True,
+            "reason": None,
+            "class_space_a": class_space_a,
+            "class_space_b": class_space_b,
+            "class_space_hash_a": class_hash_a,
+            "class_space_hash_b": class_hash_b,
+        }
+
+    if class_space_a is None or class_space_b is None:
+        reason = "Missing class-space metadata on one or both commits."
+    elif set(class_space_a) == set(class_space_b):
+        reason = "Class labels match but order differs; output-neuron semantics are incompatible."
+    else:
+        reason = "Class spaces differ between commits."
+
+    return {
+        "class_space_compatible": False,
+        "reason": reason,
+        "class_space_a": class_space_a,
+        "class_space_b": class_space_b,
+        "class_space_hash_a": class_hash_a,
+        "class_space_hash_b": class_hash_b,
+    }
+
+
 def format_output(
     commit_a: str,
     commit_b: str,
@@ -402,6 +465,7 @@ def format_output(
     layer_stats: List[Dict[str, Any]],
     metadata_changes: Dict[str, Tuple[Any, Any]],
     metric_changes: Dict[str, Tuple[Any, Any]],
+    class_space_info: Dict[str, Any],
     merge_readiness: Dict[str, Any],
 ) -> None:
     """Format and print standard diff output."""
@@ -478,6 +542,14 @@ Cosine similarity between models: {overall_stats['cosine_similarity']:.4f}"""
     
     dims_mark = "✓" if merge_readiness.get("parameter_dimensions_compatible", True) else "✗"
     console.print(f"  Parameter dimensions compatible: {dims_mark}")
+
+    class_mark = "✓" if merge_readiness.get("class_space_compatible", False) else "✗"
+    console.print(f"  Class space compatible: {class_mark}")
+
+    if not merge_readiness.get("class_space_compatible", False):
+        reason = class_space_info.get("reason")
+        if reason:
+            console.print(f"  [yellow]Reason: {reason}[/yellow]")
     
     if merge_readiness.get("merge_possible", False):
         console.print(f"  Update magnitude: {merge_readiness['update_magnitude']}")
@@ -499,6 +571,7 @@ def format_detailed_output(
     layer_stats: List[Dict[str, Any]],
     metadata_changes: Dict[str, Tuple[Any, Any]],
     metric_changes: Dict[str, Tuple[Any, Any]],
+    class_space_info: Dict[str, Any],
     merge_readiness: Dict[str, Any],
 ) -> None:
     """Format and print detailed diff output with all layers."""
@@ -513,6 +586,7 @@ def format_detailed_output(
         layer_stats,
         metadata_changes,
         metric_changes,
+        class_space_info,
         merge_readiness,
     )
     
@@ -551,6 +625,7 @@ def format_json_output(
     layer_stats: List[Dict[str, Any]],
     metadata_changes: Dict[str, Tuple[Any, Any]],
     metric_changes: Dict[str, Tuple[Any, Any]],
+    class_space_info: Dict[str, Any],
     merge_readiness: Dict[str, Any],
 ) -> str:
     """Format diff output as JSON."""
@@ -573,6 +648,14 @@ def format_json_output(
         "layers": layer_stats,
         "metadataChanges": metadata_changes_json,
         "metricChanges": metric_changes_json,
+        "classSpace": {
+            "compatible": class_space_info.get("class_space_compatible", False),
+            "reason": class_space_info.get("reason"),
+            "classSpaceA": class_space_info.get("class_space_a"),
+            "classSpaceB": class_space_info.get("class_space_b"),
+            "classSpaceHashA": class_space_info.get("class_space_hash_a"),
+            "classSpaceHashB": class_space_info.get("class_space_hash_b"),
+        },
         "mergeReadiness": merge_readiness,
     }
     
@@ -642,10 +725,12 @@ def diff(
         # Extract metadata and metric changes
         metadata_changes = extract_metadata_changes(metadata_a, metadata_b)
         metric_changes = extract_metric_changes(metadata_a, metadata_b)
+        class_space_info = compute_class_space_compatibility(metadata_a, metadata_b)
         
         # Compute merge readiness
         merge_readiness = compute_merge_readiness(
             overall_stats["architecture_compatible"],
+            class_space_info.get("class_space_compatible", False),
             params_a,
             params_b,
             overall_stats,
@@ -662,6 +747,7 @@ def diff(
                 layer_stats,
                 metadata_changes,
                 metric_changes,
+                class_space_info,
                 merge_readiness,
             )
             console.print(json_str)
@@ -675,6 +761,7 @@ def diff(
                 layer_stats,
                 metadata_changes,
                 metric_changes,
+                class_space_info,
                 merge_readiness,
             )
         else:
@@ -687,6 +774,7 @@ def diff(
                 layer_stats,
                 metadata_changes,
                 metric_changes,
+                class_space_info,
                 merge_readiness,
             )
     

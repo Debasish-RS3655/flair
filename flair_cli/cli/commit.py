@@ -11,6 +11,7 @@ import hashlib
 
 from .utils.local_commits import _get_commit_by_hash, _get_head_info, _get_latest_local_commit
 from .utils.architecture import ArchitectureMismatch, compute_architecture_hash, resolve_commit_type
+from .utils.class_space import compute_class_space_hash
 from .utils.param_io import _load_numpy_params as _shared_load_numpy_params
 from .utils.param_io import _load_pytorch_params as _shared_load_pytorch_params
 from .utils.param_io import _save_numpy_params as _shared_save_numpy_params
@@ -322,6 +323,18 @@ def finalize(
         current_architecture_hash = commit_data.get("architectureHash")
         previous_architecture_hash = commit_data.get("previousArchitectureHash")
         architecture_changed = bool(commit_data.get("architectureChanged"))
+        current_class_space = commit_data.get("classSpace")
+        current_class_space_hash = commit_data.get("classSpaceHash")
+        previous_class_space_hash = commit_data.get("previousClassSpaceHash")
+        class_space_changed = bool(commit_data.get("classSpaceChanged"))
+
+        if current_class_space_hash is None and isinstance(current_class_space, list) and current_class_space:
+            current_class_space_hash = compute_class_space_hash(current_class_space)
+
+        if not current_class_space_hash:
+            console.print("[red]✗ Missing class-space metadata on commit.[/red]")
+            console.print("[yellow]Run 'flair params create --classes ...' to set class-space contract.[/yellow]")
+            raise typer.Exit(code=1)
 
         if not current_architecture_hash:
             params_info = commit_data.get("params")
@@ -342,13 +355,22 @@ def finalize(
             if current_params is None:
                 raise typer.Exit(code=1)
 
-            current_architecture_hash = compute_architecture_hash(current_params, framework=framework)
+            current_architecture_hash = compute_architecture_hash(
+                current_params,
+                framework=framework,
+                metadata={"classSpace": current_class_space, "classSpaceHash": current_class_space_hash},
+            )
 
         if previous_commit_hash and previous_commit_hash != "_GENESIS_COMMIT_" and not previous_architecture_hash:
             previous_commit_result = _get_commit_by_hash(previous_commit_hash)
             if previous_commit_result:
                 previous_commit_data, previous_commit_dir = previous_commit_result
                 previous_architecture_hash = previous_commit_data.get("architectureHash")
+                if not previous_class_space_hash:
+                    previous_class_space_hash = previous_commit_data.get("classSpaceHash")
+                    previous_class_space = previous_commit_data.get("classSpace")
+                    if not previous_class_space_hash and isinstance(previous_class_space, list) and previous_class_space:
+                        previous_class_space_hash = compute_class_space_hash(previous_class_space)
                 if not previous_architecture_hash:
                     previous_params_info = previous_commit_data.get("params")
                     if previous_params_info and previous_params_info.get("file"):
@@ -359,7 +381,23 @@ def finalize(
                             else:
                                 previous_params = _load_numpy_params(previous_params_file)
                             if previous_params is not None:
-                                previous_architecture_hash = compute_architecture_hash(previous_params, framework=framework)
+                                previous_architecture_hash = compute_architecture_hash(
+                                    previous_params,
+                                    framework=framework,
+                                    metadata={
+                                        "classSpaceHash": previous_class_space_hash,
+                                    },
+                                )
+
+        if previous_class_space_hash and current_class_space_hash != previous_class_space_hash:
+            class_space_changed = True
+            architecture_changed = True
+
+        if class_space_changed:
+            console.print("[yellow]⚠ Class-space change detected: finalizing as CHECKPOINT.[/yellow]")
+            console.print(f"[yellow]  Current class-space hash: {current_class_space_hash[:16]}...[/yellow]")
+            if previous_class_space_hash:
+                console.print(f"[yellow]  Previous class-space hash: {previous_class_space_hash[:16]}...[/yellow]")
 
         inferred_commit_type, inferred_architecture_changed = resolve_commit_type(
             current_architecture_hash,
@@ -464,6 +502,9 @@ def finalize(
         commit_data["architectureHash"] = current_architecture_hash
         commit_data["previousArchitectureHash"] = previous_architecture_hash
         commit_data["architectureChanged"] = architecture_changed
+        commit_data["classSpaceHash"] = current_class_space_hash
+        commit_data["previousClassSpaceHash"] = previous_class_space_hash
+        commit_data["classSpaceChanged"] = class_space_changed
         commit_data["message"] = message
         commit_data["commitType"] = commit_type
         commit_data["status"] = "FINALIZED"

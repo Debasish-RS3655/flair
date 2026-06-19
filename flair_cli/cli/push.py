@@ -155,6 +155,29 @@ def _load_repo_config() -> dict:
         return json.load(f)
 
 
+def _can_publish_merge_commit(repo_config: dict, branch_name: str, wallet_address: str) -> tuple[bool, str]:
+    """Check whether current wallet can publish MERGE commits on target branch."""
+    metadata = repo_config.get("metadata", {}) if isinstance(repo_config, dict) else {}
+    policy = metadata.get("mergePolicy") or repo_config.get("mergePolicy")
+
+    if not isinstance(policy, dict):
+        # No policy configured yet: preserve current behavior.
+        return True, ""
+
+    protected_branches = policy.get("protectedBranches") or []
+    if protected_branches and branch_name not in protected_branches:
+        return True, ""
+
+    authorized = policy.get("authorizedMergers") or policy.get("authorizedWallets") or []
+    if not authorized:
+        return False, "MERGE commits are protected but no authorized mergers are configured."
+
+    if wallet_address not in authorized:
+        return False, "Permission denied. MERGE commits require maintainer access."
+
+    return True, ""
+
+
 def _load_repo_settings() -> dict:
     """Load repo settings from config.yaml in the repo root."""
     settings_file = Path.cwd() / "config.yaml"
@@ -326,6 +349,13 @@ def push(
             raise typer.Exit(0)
         
         console.print(f"[cyan]Pushing {len(commits_to_push)} commit(s) serially...[/cyan]\n")
+
+        current_session = session.load_session()
+        if not current_session or not current_session.wallet_address:
+            console.print("[red]Authenticated wallet not found. Run 'flair auth login'.[/red]")
+            raise typer.Exit(code=1)
+
+        wallet_address = current_session.wallet_address
         
         # Determine initial parent commit hash
         parent_commit_hash = remote_head_hash if remote_head_hash else "_GENESIS_COMMIT_"
@@ -339,6 +369,13 @@ def push(
             message = commit_data.get("message")
             commit_type = commit_data.get("commitType", "CHECKPOINT")
             commit_metrics = commit_data.get("metrics")
+
+            if commit_type == "MERGE":
+                allowed, denial_reason = _can_publish_merge_commit(repo_config, target_branch_name, wallet_address)
+                if not allowed:
+                    console.print(f"[red]✗ Commit {idx}: {denial_reason}[/red]")
+                    console.print(f"[yellow]Stopping push after {pushed_count} successful commit(s).[/yellow]")
+                    raise typer.Exit(code=1)
             
             console.print(f"[bold cyan]═══ Commit {idx}/{len(commits_to_push)} ═══[/bold cyan]")
             console.print(f"[dim]Hash: {commit_hash[:16]}...[/dim]")
@@ -508,13 +545,7 @@ def push(
             signed_at = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
             # Principal used for commit attribution (currently the authenticated wallet address).
-            current_session = session.load_session()
-            if not current_session or not current_session.wallet_address:
-                console.print(f"[red]✗ Commit {idx}: User principal not available[/red]")
-                console.print(f"[yellow]Run 'flair auth login' before pushing commits[/yellow]")
-                console.print(f"[yellow]Stopping push after {pushed_count} successful commit(s).[/yellow]")
-                raise typer.Exit(code=1)
-            user_principal = current_session.wallet_address
+            user_principal = wallet_address
 
             # SSH-MIGRATION: replace the entire Solana keypair block below with SSH signing.
             # Expected flow: build canonical payload → invoke ssh-agent / ~/.ssh key → sign payload

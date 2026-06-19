@@ -74,6 +74,12 @@ def add():
             "architectureHash": None,
             "previousArchitectureHash": None,
             "architectureChanged": False,
+            "classSpace": None,
+            "classSpaceHash": None,
+            "previousClassSpaceHash": None,
+            "classSpaceChanged": False,
+            "mergeStrategy": None,
+            "mergeParents": None,
             "createdAt": None,
             "status": "CREATED"
         }

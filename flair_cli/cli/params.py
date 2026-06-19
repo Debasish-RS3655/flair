@@ -12,6 +12,13 @@ from .utils.local_commits import _get_commit_by_hash, _get_head_info, _get_lates
 from .utils.architecture import ArchitectureMismatch, compute_architecture_hash
 from .utils.param_io import _load_numpy_params as _shared_load_numpy_params
 from .utils.param_io import _load_pytorch_params as _shared_load_pytorch_params
+from .utils.class_space import (
+    ClassSpaceMismatch,
+    compute_class_space_hash,
+    ensure_class_space_contract,
+    load_class_space_from_file,
+    parse_class_space_option,
+)
 
 app = typer.Typer()
 console = Console()
@@ -337,6 +344,8 @@ def _compute_onnx_delta(
 @app.command()
 def create(
     model: str = typer.Option(None, "--model", help="Path to model file"),
+    classes: str = typer.Option(None, "--classes", help="Comma-separated ordered class labels (e.g., cat,dog,bird)"),
+    class_space_file: str = typer.Option(None, "--class-space-file", help="Path to YAML/JSON/TXT class-space declaration"),
 ):
     """Extract model weights and save as params for the latest local commit.
     
@@ -373,6 +382,32 @@ def create(
             console.print("[red]Invalid commit data.[/red]")
             raise typer.Exit(code=1)
         
+        # Resolve class-space contract before extracting parameters.
+        provided_class_space = parse_class_space_option(classes)
+        if class_space_file:
+            file_labels = load_class_space_from_file(Path(class_space_file))
+            if provided_class_space is not None and provided_class_space != file_labels:
+                console.print("[red]Class-space mismatch between --classes and --class-space-file.[/red]")
+                raise typer.Exit(code=1)
+            provided_class_space = file_labels
+
+        try:
+            class_space, class_space_hash, contract_created = ensure_class_space_contract(
+                flair_dir,
+                provided_class_space,
+            )
+        except ClassSpaceMismatch as e:
+            console.print(f"[red]✗ {e}[/red]")
+            raise typer.Exit(code=1)
+        except ValueError as e:
+            console.print(f"[red]✗ {e}[/red]")
+            raise typer.Exit(code=1)
+
+        if contract_created:
+            console.print("[green]✓ Created repository class-space contract in .flair/class_space.yaml[/green]")
+
+        console.print(f"[dim]Class space: {class_space}[/dim]")
+
         # Determine model file
         model_path = None
         
@@ -438,6 +473,7 @@ def create(
             current_architecture_hash = compute_architecture_hash(
                 current_params_data,
                 framework=framework,
+                metadata={"classSpace": class_space, "classSpaceHash": class_space_hash},
             )
 
             # Compute delta parameters if there's a previous commit.
@@ -445,13 +481,21 @@ def create(
             previous_commit_hash = head_info.get("previousCommit", "_GENESIS_COMMIT_") if head_info else "_GENESIS_COMMIT_"
             previous_architecture_hash = None
             architecture_changed = False
+            previous_class_space_hash = None
+            class_space_changed = False
             delta_params_info = None
 
             if previous_commit_hash and previous_commit_hash != "_GENESIS_COMMIT_":
+                previous_class_space = None
                 previous_commit_result = _get_commit_by_hash(previous_commit_hash)
                 if previous_commit_result:
                     previous_commit_data, _ = previous_commit_result
                     previous_architecture_hash = previous_commit_data.get("architectureHash")
+                    previous_class_space = previous_commit_data.get("classSpace")
+                    previous_class_space_hash = previous_commit_data.get("classSpaceHash")
+                    if not previous_class_space_hash and previous_commit_data.get("classSpace"):
+                        if isinstance(previous_class_space, list):
+                            previous_class_space_hash = compute_class_space_hash(previous_class_space)
 
                 if not previous_architecture_hash:
                     previous_params_path = _get_previous_commit_params(previous_commit_hash)
@@ -461,7 +505,18 @@ def create(
                             previous_architecture_hash = compute_architecture_hash(
                                 previous_params_data,
                                 framework=framework,
+                                metadata={
+                                    "classSpace": previous_class_space,
+                                    "classSpaceHash": previous_class_space_hash,
+                                },
                             )
+
+                if previous_class_space_hash and class_space_hash != previous_class_space_hash:
+                    class_space_changed = True
+                    architecture_changed = True
+                    console.print("[yellow]⚠ Class-space change detected: this commit will be finalized as a CHECKPOINT.[/yellow]")
+                    console.print(f"[yellow]  Current class-space hash: {class_space_hash[:16]}...[/yellow]")
+                    console.print(f"[yellow]  Previous class-space hash: {previous_class_space_hash[:16]}...[/yellow]")
 
                 if previous_architecture_hash and current_architecture_hash != previous_architecture_hash:
                     architecture_changed = True
@@ -544,6 +599,10 @@ def create(
             commit_data["architectureHash"] = current_architecture_hash
             commit_data["previousArchitectureHash"] = previous_architecture_hash
             commit_data["architectureChanged"] = architecture_changed
+            commit_data["classSpace"] = class_space
+            commit_data["classSpaceHash"] = class_space_hash
+            commit_data["previousClassSpaceHash"] = previous_class_space_hash
+            commit_data["classSpaceChanged"] = class_space_changed
             commit_data["deltaParams"] = delta_params_info
 
             with open(commit_file, 'w') as f:
@@ -553,8 +612,11 @@ def create(
             console.print(f"  File: {output_path.name}")
             console.print(f"  Hash: {params_hash[:16]}...")
             console.print(f"  Architecture hash: {current_architecture_hash[:16]}...")
+            console.print(f"  Class-space hash: {class_space_hash[:16]}...")
             if previous_architecture_hash:
                 console.print(f"  Previous architecture hash: {previous_architecture_hash[:16]}...")
+            if previous_class_space_hash:
+                console.print(f"  Previous class-space hash: {previous_class_space_hash[:16]}...")
             if architecture_changed:
                 console.print("  [yellow]Architecture changed: commit will be finalized as CHECKPOINT[/yellow]")
             if delta_params_info:
