@@ -6,7 +6,12 @@ from flwr.server.strategy import FedAvg  # Federated strategy
 from flwr_serverless import AsyncFederatedNode
 from flwr_serverless.keras import FlwrFederatedCallback
 
-from lib.shared_folder_http import SharedFolderHTTPAuth
+import sys
+from pathlib import Path
+# Add project root to path so we can import flair_cli
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from flair_cli.core.shared_folder import SharedFolderHTTPAuth
 
 # Define the federated learning strategy and shared folder
 strategy = FedAvg()

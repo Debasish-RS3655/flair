@@ -7,7 +7,7 @@ import requests
 class SharedFolderHTTPAuth:
     """
     HTTP-backed shared folder with per-request Authorization header and success-flag handling.
-    Endpoints (must be implemented by your HTTP file‐service):
+    Endpoints (must be implemented by your HTTP file-service):
       GET    /files/<key>          → raw bytes of <key> or 404 if missing
       PUT    /files/<key>          → write raw bytes to <key>
       DELETE /files/<key>          → delete <key>

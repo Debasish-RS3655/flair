@@ -4,18 +4,24 @@ version = "0.1.0"
 description = "Flair CLI — record-only model repository and commit ledger for ML model evolution"
 authors = [ { name = "Flair Contributors" } ]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 
 [project.scripts]
 flair = "flair_cli.main:app"
 
+[tool.poetry]
+name = "flair-cli"
+version = "0.1.0"
+description = "Flair CLI — record-only model repository and commit ledger for ML model evolution"
+authors = [ "Flair Contributors" ]
+
 [tool.poetry.dependencies]
-python = ">=3.10"
-typer = "^0.9"
+python = ">=3.12,<4.0"
+typer = "*"
+rich = "*"
 httpx = "^0.24"
-rich = "^13.0"
-pydantic = "^1.10"
+pydantic = "*"
 pyyaml = "^6.0"
 numpy = "^1.26"
 onnx = "^1.16"
@@ -23,10 +29,9 @@ tf2onnx = "^1.15"
 tensorflow = "^2.15"
 torch = "^2.2"
 ezkl = ">=0.4.0"
-# SSH-MIGRATION: remove PyNaCl and base58 once Solana commit signing is replaced by SSH signing.
 PyNaCl = "^1.5"
 base58 = "^2.1"
 
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
