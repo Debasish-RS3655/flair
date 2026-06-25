@@ -1,0 +1,982 @@
+import { prisma } from '../lib/prisma/index.js';
+import { Router } from 'express';
+import { authorizedPk } from '../middleware/auth/authHandler.js';
+import {
+    convertCommitToNft,
+    // fetchCnft, 
+    // fetchCNftFromSignature
+} from '../lib/nft/nft.js';
+import { umi } from '../lib/nft/umi.js';
+import { v4 as uuidV4 } from 'uuid';
+import { sharedFolderRouter } from './sharedFolder.js';
+import { extractMetricsAfter } from '../lib/sharedFolder/index.js';
+import { ZKMLProofCreateObj } from '../lib/types/zkmlproof.js';
+import storageProvider from '../lib/storage/index.js';
+import { constructIPFSUrl } from '../lib/ipfs/ipfs.js';
+import jwt from 'jsonwebtoken';
+import config from '../../config.js';
+import path from 'path';
+import fs from 'fs';
+import { paramsUploader } from '../lib/multer/index.js';
+
+// Short-lived token used to authorize ZKML uploads and commit creation
+const ZKP_JWT_SECRET = process.env.ZKP_JWT_SECRET || 'super-secret-commit-generation';
+const COMMIT_JWT_SECRET = process.env.COMMIT_JWT_SECRET || 'another-super-secret-commit-generation';
+const SESSION_EXPIRY_MINUTES = config.commit.session.expiryMinutes || 10;
+const BLOCK_DURATION_MINUTES = config.commit.session.blockDurationMinutes || 2;
+
+const commitRouter = Router();
+
+// Helper: Block user for 2 minutes
+async function blockUser(pk: string) {
+    const blockedUntil = new Date(Date.now() + BLOCK_DURATION_MINUTES * 60 * 1000);
+    await prisma.initiationBlock.upsert({
+        where: { pk },
+        update: { blockedUntil },
+        create: { pk, blockedUntil }
+    });
+}
+
+// Helper: Record session error and block user
+async function recordSessionError(sessionId: string, pk: string) {
+    await prisma.commitCreationSession.update({
+        where: { id: sessionId },
+        data: {
+            status: 'ERROR',
+            lastErrorAt: new Date(),
+            errorCount: { increment: 1 }
+        }
+    });
+    await blockUser(pk);
+}
+
+// Get all commits for a specific branch (exluding the parameters and the merged parameters)
+commitRouter.get('/', async (req, res) => {
+    const { branchId } = req;
+    try {
+        const commits = await prisma.commit.findMany({ where: { branchId } });
+        res.status(200).json({ data: commits });
+        return;
+    } catch (err) {
+        console.error('Error retrieving commits:', err);
+        res.status(500).send({ error: { message: 'Internal Server Error' } });
+        return;
+    }
+});
+
+
+// complete info for the commit for pulling it
+commitRouter.get('/hash/:commitHash/pull', async (req, res) => {
+    const { commitHash } = req.params;
+    try {
+        const commit = await prisma.commit.findFirst({
+            where: { commitHash },
+            include: {
+                branch: true,
+                committer: true,
+                params: {
+                    include: {
+                        ipfsObject: true,
+                        ZKMLProof: {
+                            include: {
+                                proof: true,
+                                settings: true,
+                                verification_key: true
+                            }
+                        }
+                    }
+                },
+                nft: {
+                    include: {
+                        collection: true
+                    }
+                },
+            }
+        });
+        if (!commit) {
+            res.status(404).send({ error: { message: 'Commit not found.' } });
+            return;
+        }
+        res.status(200).json({ data: commit });
+    } catch (err) {
+        console.error('Error retrieving commit:', err);
+        res.status(500).send({ error: { message: 'Internal Server Error' } });
+    }
+});
+
+// basic details of a commit
+commitRouter.get('/hash/:commitHash', async (req, res) => {
+    const { commitHash } = req.params;
+    try {
+        const commit = await prisma.commit.findFirst({
+            where: { commitHash }
+        });
+        if (!commit) {
+            res.status(404).send({ error: { message: 'Commit not found.' } });
+            return;
+        }
+        res.status(200).json({ data: commit });
+    } catch (err) {
+        console.error('Error retrieving commit:', err);
+        res.status(500).send({ error: { message: 'Internal Server Error' } });
+    }
+});
+
+// pull the latest commit
+commitRouter.get('/latest', async (req, res) => {
+    try {
+        const { branchId } = req;
+        // latest commit in this branch
+        const latestCommit = await prisma.commit.findFirst({
+            where: { branchId },
+            orderBy: { createdAt: 'desc', },
+            include: {
+                branch: true,
+                committer: true,
+                params: {
+                    include: {
+                        ipfsObject: true,
+                        ZKMLProof: {
+                            include: {
+                                proof: true,
+                                settings: true,
+                                verification_key: true
+                            }
+                        }
+                    }
+                },
+                nft: {
+                    include: {
+                        collection: true
+                    }
+                },
+            }
+        });
+        if (!latestCommit) {
+            res.status(404).send({ error: { message: 'No commits found.' } });
+            return;
+        }
+        res.status(200).json({ data: latestCommit });
+    } catch (err) {
+        console.error('Error retrieving the latest commit:', err);
+        res.status(500).send({ error: { message: 'Internal Server Error' } });
+    }
+});
+
+
+// ========================================
+// STEP 1: Initiate commit creation session
+// ========================================
+commitRouter.post('/create/initiate', async (req, res) => {
+    try {
+        const pk = authorizedPk(res);
+        const { repoId, branchId } = req;
+        // Check if user is currently blocked
+        const block = await prisma.initiationBlock.findUnique({ where: { pk } });
+        if (block && block.blockedUntil > new Date()) {
+            const remainingSeconds = Math.ceil((block.blockedUntil.getTime() - Date.now()) / 1000);
+            res.status(403).json({
+                error: { message: `Initiation blocked. Please try again in ${remainingSeconds} seconds.` }
+            });
+            return;
+        }
+
+        // Validate repo and branch access if provided
+        if (repoId) {
+            const repo = await prisma.repository.findUnique({ where: { id: repoId } });
+            if (!repo) {
+                res.status(404).json({ error: { message: 'Repository not found.' } });
+                return;
+            }
+            if (repo.ownerAddress !== pk && !repo.writeAccessIds.includes(pk)) {
+                res.status(403).json({ error: { message: 'Unauthorized. You do not have write access to this repository.' } });
+                return;
+            }
+        }
+
+        if (branchId) {
+            const branch = await prisma.branch.findUnique({ where: { id: branchId } });
+            if (!branch) {
+                res.status(404).json({ error: { message: 'Branch not found.' } });
+                return;
+            }
+        }
+
+        // Create session
+        const jti = uuidV4();
+        const expiresAt = new Date(Date.now() + SESSION_EXPIRY_MINUTES * 60 * 1000);
+        const session = await prisma.commitCreationSession.create({
+            data: {
+                jti,
+                pk,
+                repoId: repoId!,
+                branchId: branchId!,
+                expiresAt,
+                status: 'INITIATED'
+            }
+        });
+
+        // Issue initiate token
+        const initiateToken = jwt.sign({
+            type: 'commit_initiate',
+            sessionId: session.id,
+            jti,
+            pk,
+            repoId: repoId!,
+            branchId: branchId!
+        }, COMMIT_JWT_SECRET, { expiresIn: `${SESSION_EXPIRY_MINUTES}m` });
+
+        res.status(200).json({
+            sessionId: session.id,
+            initiateToken,
+            expiresAt: expiresAt.toISOString()
+        });
+
+    } catch (err) {
+        console.error('Error initiating commit session:', err);
+        res.status(500).send({ error: { message: 'Internal Server Error' } });
+    }
+});
+
+// ========================================
+// STEP 2: Check ZKML proof uniqueness and issue ZKML token
+// ========================================
+commitRouter.post('/create/zkml-check', async (req, res) => {
+    try {
+        const pk = authorizedPk(res);
+        const { sessionId, initiateToken, proofCid, settingsCid, vkCid } = req.body;
+
+        if (!sessionId || !initiateToken || !proofCid || !settingsCid || !vkCid) {
+            res.status(400).json({ error: { message: 'All fields (sessionId, initiateToken, proofCid, settingsCid, vkCid) are required.' } });
+            return
+        }
+
+        // Verify initiate token
+        let decoded: any;
+        try {
+            decoded = jwt.verify(initiateToken, COMMIT_JWT_SECRET);
+        } catch (err) {
+            res.status(403).json({ error: { message: 'Invalid or expired initiate token.' } });
+            return
+        }
+
+        if (decoded.type !== 'commit_initiate' || decoded.sessionId !== sessionId || decoded.pk !== pk) {
+            res.status(403).json({ error: { message: 'Token mismatch or unauthorized.' } });
+            return
+        }
+
+        // Verify session
+        const session = await prisma.commitCreationSession.findUnique({ where: { id: sessionId } });
+        if (!session || session.consumed || session.status !== 'INITIATED' || (session.expiresAt && session.expiresAt < new Date())) {
+            await blockUser(pk);
+            res.status(403).json({ error: { message: 'Invalid or expired session.' } });
+            return
+        }
+
+        // Check if ZKML proof triple already exists
+        const existingProof = await prisma.zKMLProof.findFirst({
+            where: {
+                proof: { cid: proofCid },
+                settings: { cid: settingsCid },
+                verification_key: { cid: vkCid }
+            }
+        });
+
+        if (existingProof) {
+            await recordSessionError(sessionId, pk);
+            res.status(409).json({ error: { message: 'ZKML proof already exists. Cannot commit duplicate proofs.' } });
+            return
+        }
+
+        // Update session status
+        await prisma.commitCreationSession.update({
+            where: { id: sessionId },
+            data: { status: 'ZKML_VERIFIED' }
+        });
+
+        // Issue ZKML token
+        const zkmlToken = jwt.sign({
+            type: 'commit_zkml',
+            sessionId,
+            allowedCids: { proofCid, settingsCid, vkCid },
+            pk
+        }, ZKP_JWT_SECRET, { expiresIn: `${SESSION_EXPIRY_MINUTES}m` });
+
+        res.status(200).json({
+            zkmlToken,
+            expiresAt: new Date(Date.now() + SESSION_EXPIRY_MINUTES * 60 * 1000).toISOString()
+        });
+
+    } catch (err) {
+        console.error('Error checking ZKML:', err);
+        res.status(500).send({ error: { message: 'Internal Server Error' } });
+    }
+});
+
+
+// ========================================
+// STEP 3: Upload ZKML Proofs (Pre-Commit)
+// ========================================
+// Uploads proof/settings/vk to IPFS, locks them via a receipt token for finalize.
+commitRouter.post('/create/zkml-upload', async (req, res) => {
+    try {
+        const pk = authorizedPk(res);
+        const { sessionId, initiateToken, zkmlToken, proof, settings, verification_key } = req.body;
+
+        if (!sessionId || !initiateToken || !zkmlToken || !proof || !settings || !verification_key) {
+            res.status(400).json({
+                error: { message: 'All fields (sessionId, initiateToken, zkmlToken, proof, settings, verification_key) are required.' }
+            });
+            return;
+        }
+
+        // Verify initiate token
+        let sessionJwt: any;
+        try {
+            sessionJwt = jwt.verify(initiateToken, COMMIT_JWT_SECRET);
+        } catch {
+            res.status(403).json({ error: { message: 'Invalid or expired initiateToken.' } });
+            return;
+        }
+
+        if (sessionJwt.type !== 'commit_initiate' || sessionJwt.sessionId !== sessionId || sessionJwt.pk !== pk) {
+            res.status(403).json({ error: { message: 'Initiate token mismatch or unauthorized.' } });
+            return;
+        }
+
+        // Verify zkml token
+        let zkmlJwt: any;
+        try {
+            zkmlJwt = jwt.verify(zkmlToken, ZKP_JWT_SECRET);
+        } catch {
+            res.status(403).json({ error: { message: 'Invalid or expired zkmlToken.' } });
+            return;
+        }
+
+        if (zkmlJwt.type !== 'commit_zkml' || zkmlJwt.sessionId !== sessionId || zkmlJwt.pk !== pk) {
+            await recordSessionError(sessionId, pk);
+            res.status(403).json({ error: { message: 'ZKML token mismatch or unauthorized.' } });
+            return;
+        }
+
+        // Verify session is valid and not consumed
+        const session = await prisma.commitCreationSession.findUnique({ where: { id: sessionId } });
+        if (!session || session.consumed || session.status !== 'ZKML_VERIFIED' || (session.expiresAt && session.expiresAt < new Date())) {
+            await recordSessionError(sessionId, pk);
+            res.status(403).json({ error: { message: 'Invalid or expired session.' } });
+            return;
+        }
+
+        // Upload proof, settings, and verification_key to IPFS
+        const proofUpload = await storageProvider.add(proof, { pin: true });
+        const settingsUpload = await storageProvider.add(settings, { pin: true });
+        const vkUpload = await storageProvider.add(verification_key, { pin: true });
+
+        // Verify uploaded CIDs match the authorized CIDs from zkmlToken
+        const allowed = zkmlJwt.allowedCids || {};
+        if (proofUpload.cid.toString() !== allowed.proofCid ||
+            settingsUpload.cid.toString() !== allowed.settingsCid ||
+            vkUpload.cid.toString() !== allowed.vkCid) {
+            await recordSessionError(sessionId, pk);
+            res.status(403).json({
+                error: { message: 'Security Mismatch: Uploaded ZKML files do not match the CIDs authorized in the token.' }
+            });
+            return;
+        }
+
+        // Upsert IpfsObject records for each file
+        const proofIpfs = await prisma.ipfsObject.upsert({
+            where: { cid: proofUpload.cid.toString() },
+            update: {},
+            create: {
+                cid: proofUpload.cid.toString(),
+                uri: constructIPFSUrl(proofUpload.cid),
+                extension: 'json',
+                size: proofUpload.size || 0
+            }
+        });
+
+        const settingsIpfs = await prisma.ipfsObject.upsert({
+            where: { cid: settingsUpload.cid.toString() },
+            update: {},
+            create: {
+                cid: settingsUpload.cid.toString(),
+                uri: constructIPFSUrl(settingsUpload.cid),
+                extension: 'json',
+                size: settingsUpload.size || 0
+            }
+        });
+
+        const vkIpfs = await prisma.ipfsObject.upsert({
+            where: { cid: vkUpload.cid.toString() },
+            update: {},
+            create: {
+                cid: vkUpload.cid.toString(),
+                uri: constructIPFSUrl(vkUpload.cid),
+                extension: 'json',
+                size: vkUpload.size || 0
+            }
+        });
+
+        // Check for duplicate ZKML proofs
+        const existingProof = await prisma.zKMLProof.findFirst({
+            where: {
+                proofIpfsId: proofIpfs.id,
+                settingsIpfsId: settingsIpfs.id,
+                verificationKeyIpfsId: vkIpfs.id
+            }
+        });
+
+        if (existingProof) {
+            await recordSessionError(sessionId, pk);
+            res.status(409).json({ error: { message: 'ZKML proof already exists.' } });
+            return;
+        }
+
+        // Update session status and store ZKML IDs for cleanup tracking
+        await prisma.commitCreationSession.update({
+            where: { id: sessionId },
+            data: {
+                status: 'ZKML_UPLOADED',
+                zkmlProofIpfsId: proofIpfs.id,
+                zkmlSettingsIpfsId: settingsIpfs.id,
+                zkmlVkIpfsId: vkIpfs.id
+            }
+        });
+
+        // Issue a receipt token to bind these uploads to the finalize step
+        const zkmlReceiptToken = jwt.sign({
+            type: 'commit_zkml_receipt',
+            sessionId,
+            pk,
+            repoId: sessionJwt.repoId,
+            branchId: sessionJwt.branchId,
+            proofIpfsId: proofIpfs.id,
+            settingsIpfsId: settingsIpfs.id,
+            vkIpfsId: vkIpfs.id
+        }, ZKP_JWT_SECRET, { expiresIn: `${SESSION_EXPIRY_MINUTES}m` });
+
+        res.status(200).json({
+            success: true,
+            message: 'ZKML files uploaded successfully. Proceed to finalize.',
+            zkmlReceiptToken,
+            proofCid: proofIpfs.cid,
+            settingsCid: settingsIpfs.cid,
+            vkCid: vkIpfs.cid
+        });
+
+    } catch (err) {
+        console.error('Error uploading ZKML params:', err);
+        res.status(500).send({ error: { message: 'Internal Server Error' } });
+    }
+});
+
+// ========================================
+// STEP 3.5: Upload Model Parameters (Binary File)
+// ========================================
+// Uploads the ML model parameters/weights as a binary file to IPFS
+// This route must come after ZKML upload and before finalize
+commitRouter.post('/create/params-upload', paramsUploader, async (req, res) => {
+    let paramsCid: string | null = null;
+    try {
+        const pk = authorizedPk(res);
+        const { sessionId, initiateToken, zkmlReceiptToken } = req.body;
+
+        // Validate required fields
+        if (!sessionId || !initiateToken || !zkmlReceiptToken) {
+            res.status(400).json({
+                error: { message: 'All fields (sessionId, initiateToken, zkmlReceiptToken) are required.' }
+            });
+            return;
+        }
+
+        if (!req.file) {
+            res.status(400).json({ error: { message: 'No parameters file uploaded.' } });
+            return;
+        }
+
+        // Verify initiate token
+        let sessionJwt: any;
+        try {
+            sessionJwt = jwt.verify(initiateToken, COMMIT_JWT_SECRET);
+        } catch {
+            res.status(403).json({ error: { message: 'Invalid or expired initiateToken.' } });
+            return;
+        }
+
+        if (sessionJwt.type !== 'commit_initiate' || sessionJwt.sessionId !== sessionId || sessionJwt.pk !== pk) {
+            res.status(403).json({ error: { message: 'Initiate token mismatch or unauthorized.' } });
+            return;
+        }
+
+        // Verify zkml receipt token
+        let receiptJwt: any;
+        try {
+            receiptJwt = jwt.verify(zkmlReceiptToken, ZKP_JWT_SECRET);
+        } catch {
+            res.status(403).json({ error: { message: 'Invalid or expired zkmlReceiptToken.' } });
+            return;
+        }
+
+        if (receiptJwt.type !== 'commit_zkml_receipt' || receiptJwt.sessionId !== sessionId || receiptJwt.pk !== pk) {
+            res.status(403).json({ error: { message: 'ZKML receipt mismatch or unauthorized.' } });
+            return;
+        }
+
+        // Verify session state - must be ZKML_UPLOADED
+        const session = await prisma.commitCreationSession.findUnique({ where: { id: sessionId } });
+        if (!session || session.consumed || session.status !== 'ZKML_UPLOADED' || (session.expiresAt && session.expiresAt < new Date())) {
+            await recordSessionError(sessionId, pk);
+            res.status(403).json({ error: { message: 'Invalid or expired session. Expected ZKML_UPLOADED status.' } });
+            return;
+        }
+
+        // Check if params already uploaded for this session (prevent duplicate uploads)
+        if (session.paramsIpfsId) {
+            res.status(409).json({ error: { message: 'Parameters already uploaded for this commit. Cannot upload multiple parameter sets.' } });
+            return;
+        }
+
+        const paramsPath = path.join(req.file.destination, req.file.filename);
+        if (!fs.existsSync(paramsPath)) {
+            console.error('Error: Params file does not exist for uploading to IPFS.');
+            res.status(500).json({ error: { message: 'Internal Server Error: File not found.' } });
+            return;
+        }
+
+        const fileSize = req.file.size;
+        if (!fileSize) {
+            res.status(400).json({ error: { message: 'Invalid file size.' } });
+            return;
+        }
+
+        // Upload params to IPFS
+        const paramsUploadRes = await storageProvider.add(paramsPath, { pin: true });
+        paramsCid = paramsUploadRes?.cid?.toString();
+
+        if (!paramsCid) {
+            res.status(500).json({ error: { message: 'Could not upload parameters to IPFS.' } });
+            return;
+        }
+
+        // Create or reuse IpfsObject record for the params
+        const paramsIpfs = await prisma.ipfsObject.upsert({
+            where: { cid: paramsCid },
+            update: {},
+            create: {
+                cid: paramsCid,
+                uri: constructIPFSUrl(paramsCid),
+                extension: req.fileExtension || 'bin',
+                size: fileSize
+            }
+        });
+
+        // Update session to store params IPFS ID and change status
+        await prisma.commitCreationSession.update({
+            where: { id: sessionId },
+            data: {
+                status: 'PARAMS_UPLOADED',
+                paramsIpfsId: paramsIpfs.id
+            }
+        });
+
+        // Issue params receipt token for use in finalize
+        const paramsReceiptToken = jwt.sign({
+            type: 'commit_params_receipt',
+            sessionId,
+            pk,
+            repoId: sessionJwt.repoId,
+            branchId: sessionJwt.branchId,
+            paramsIpfsId: paramsIpfs.id
+        }, ZKP_JWT_SECRET, { expiresIn: `${SESSION_EXPIRY_MINUTES}m` });
+
+        res.status(200).json({
+            success: true,
+            message: 'Parameters uploaded successfully. Proceed to finalize.',
+            paramsReceiptToken,
+            paramsCid: paramsIpfs.cid,
+            paramsIpfsId: paramsIpfs.id
+        });
+
+    } catch (err) {
+        console.error('Error uploading parameters:', err);
+
+        // Cleanup orphaned params file from IPFS if upload failed
+        if (paramsCid) {
+            try {
+                console.log('Cleaning up orphaned parameters file from IPFS...');
+                await storageProvider.remove(paramsCid);
+                console.log('Successfully removed orphaned parameters file.');
+            } catch (cleanupErr) {
+                console.error('Error cleaning up parameters file from IPFS:', cleanupErr);
+            }
+        }
+
+        res.status(500).json({ error: { message: 'Internal Server Error' } });
+    }
+});
+
+// ========================================
+// STEP 4: Finalize Commit (Atomic Creation)
+// ========================================
+commitRouter.post('/create/finalize', async (req, res) => {
+    let sessionId: string | undefined;
+    let zkmlCids: { proofCid: string; settingsCid: string; vkCid: string } | null = null;
+    let paramsCid: string | null = null;
+
+    try {
+        const pk = authorizedPk(res);
+        const { branchId, repoId } = req;
+        const {
+            message,
+            paramHash,
+            architecture,
+            initiateToken,
+            zkmlReceiptToken,
+            paramsReceiptToken
+        }: {
+            message: string,
+            paramHash: string,
+            architecture: string,
+            initiateToken: string,
+            zkmlReceiptToken: string,
+            paramsReceiptToken: string
+        } = req.body;
+
+        // --- 1. Token validations ---
+        if (!initiateToken) {
+            res.status(401).json({ error: { message: 'Missing initiateToken. Call /create/initiate first.' } });
+            return;
+        }
+
+        let sessionJwt: any;
+        try {
+            sessionJwt = jwt.verify(initiateToken, COMMIT_JWT_SECRET);
+        } catch {
+            res.status(403).json({ error: { message: 'Invalid or expired initiateToken.' } });
+            return;
+        }
+
+        if (sessionJwt.pk !== pk || sessionJwt.repoId !== repoId || sessionJwt.branchId !== branchId) {
+            res.status(403).json({ error: { message: 'Initiate token does not match user/repo/branch.' } });
+            return;
+        }
+
+        sessionId = sessionJwt.sessionId as string;
+
+        // --- 2. ZKML Receipt Validation ---
+        if (!zkmlReceiptToken) {
+            res.status(400).json({ error: { message: 'Missing zkmlReceiptToken. Upload ZKML proofs before finalizing.' } });
+            return;
+        }
+
+        let zkmlReceiptJwt: any;
+        try {
+            zkmlReceiptJwt = jwt.verify(zkmlReceiptToken, ZKP_JWT_SECRET);
+        } catch {
+            res.status(403).json({ error: { message: 'Invalid or expired zkmlReceiptToken.' } });
+            return;
+        }
+
+        if (zkmlReceiptJwt.type !== 'commit_zkml_receipt' || zkmlReceiptJwt.sessionId !== sessionId || zkmlReceiptJwt.pk !== pk || zkmlReceiptJwt.repoId !== repoId || zkmlReceiptJwt.branchId !== branchId) {
+            res.status(403).json({ error: { message: 'ZKML receipt does not match current session/context.' } });
+            return;
+        }
+
+        // --- 3. Params Receipt Validation ---
+        if (!paramsReceiptToken) {
+            res.status(400).json({ error: { message: 'Missing paramsReceiptToken. Upload parameters before finalizing.' } });
+            return;
+        }
+
+        let paramsReceiptJwt: any;
+        try {
+            paramsReceiptJwt = jwt.verify(paramsReceiptToken, ZKP_JWT_SECRET);
+        } catch {
+            res.status(403).json({ error: { message: 'Invalid or expired paramsReceiptToken.' } });
+            return;
+        }
+
+        if (paramsReceiptJwt.type !== 'commit_params_receipt' || paramsReceiptJwt.sessionId !== sessionId || paramsReceiptJwt.pk !== pk || paramsReceiptJwt.repoId !== repoId || paramsReceiptJwt.branchId !== branchId) {
+            res.status(403).json({ error: { message: 'Params receipt does not match current session/context.' } });
+            return;
+        }
+
+        // Prepare nested ZKML create object up front to satisfy strict typing
+        const zkmlRelationInput: ZKMLProofCreateObj | undefined = {
+            create: {
+                proofIpfsId: zkmlReceiptJwt.proofIpfsId,
+                settingsIpfsId: zkmlReceiptJwt.settingsIpfsId,
+                verificationKeyIpfsId: zkmlReceiptJwt.vkIpfsId
+            }
+        };
+
+        // Track CIDs of uploaded files for cleanup in case of error
+        try {
+            const [proofObj, settingsObj, vkObj] = await Promise.all([
+                prisma.ipfsObject.findUnique({ where: { id: zkmlReceiptJwt.proofIpfsId } }),
+                prisma.ipfsObject.findUnique({ where: { id: zkmlReceiptJwt.settingsIpfsId } }),
+                prisma.ipfsObject.findUnique({ where: { id: zkmlReceiptJwt.vkIpfsId } })
+            ]);
+
+            if (proofObj && settingsObj && vkObj) {
+                zkmlCids = {
+                    proofCid: proofObj.cid,
+                    settingsCid: settingsObj.cid,
+                    vkCid: vkObj.cid
+                };
+            }
+
+            const paramsObj = await prisma.ipfsObject.findUnique({ where: { id: paramsReceiptJwt.paramsIpfsId } });
+            if (paramsObj) {
+                paramsCid = paramsObj.cid;
+            }
+        } catch (err) {
+            console.error('Error fetching CIDs for cleanup tracking:', err);
+        }
+
+        // Verify session state - must be PARAMS_UPLOADED
+        const session = await prisma.commitCreationSession.findUnique({ where: { id: sessionId } });
+        if (!session || session.consumed || session.status !== 'PARAMS_UPLOADED' || (session.expiresAt && session.expiresAt < new Date())) {
+            await recordSessionError(sessionId, pk);
+            res.status(403).json({ error: { message: 'Invalid or expired session. Expected PARAMS_UPLOADED status.' } });
+            return;
+        }
+
+        // --- 2. Business validations ---
+        const repo = await prisma.repository.findUnique({ where: { id: repoId }, include: { baseModel: true } });
+        if (!repo?.baseModelId) {
+            res.status(400).json({ error: { message: 'Base model not uploaded. Cannot create commit.' } });
+            return;
+        }
+        if (!message) {
+            res.status(400).json({ error: { message: 'Commit message is required.' } });
+            return;
+        }
+        if (!branchId) {
+            throw new Error('Critical Error: branchId not attached to response.');
+        }
+        if (!paramHash || !architecture) {
+            res.status(400).json({ error: { message: 'paramHash and architecture are required.' } });
+            return;
+        }
+
+        const commitHash = uuidV4();
+        const committer = await prisma.user.findFirst({ where: { principal: pk } });
+        if (!committer) {
+            res.status(401).json({ error: { message: 'User not found.' } });
+            return;
+        }
+
+        const branch = await prisma.branch.findFirst({ where: { id: branchId }, include: { repository: true } });
+        if (!branch) {
+            res.status(404).json({ error: { message: 'Branch does not exist.' } });
+            return;
+        }
+        const hasWriteAccess = branch.repository.ownerAddress === pk || branch.repository.writeAccessIds.includes(pk);
+        if (!hasWriteAccess) {
+            res.status(403).json({ error: { message: 'Unauthorized. You do not have write access to this repository.' } });
+            return;
+        }
+
+        // uniqueness on commitHash and paramHash
+        if (await prisma.commit.count({ where: { commitHash } })) {
+            res.status(400).json({ error: { message: 'Commit hash already exists.' } });
+            return;
+        }
+        if (await prisma.commit.count({ where: { paramHash } })) {
+            res.status(400).json({ error: { message: 'Parameter hash already exists.' } });
+            return;
+        }
+
+        // shared folder / metrics
+        const sharedFolder = await prisma.sharedFolderFile.findFirst({
+            where: { branchId, committerAddress: pk },
+            orderBy: { createdAt: 'desc' }
+        });
+        if (!sharedFolder) {
+            res.status(400).json({ error: { message: 'Shared folder not found. Please train and commit again.' } });
+            return;
+        }
+        const metricsRaw = extractMetricsAfter(sharedFolder);
+        const metricsExtracted = metricsRaw.at(-1);
+        if (!metricsExtracted) {
+            res.status(400).json({ error: { message: 'Metrics not found in the shared folder.' } });
+            return;
+        }
+        const metricsFinal = {
+            accuracy: parseFloat(metricsExtracted.accuracy),
+            loss: parseFloat(metricsExtracted.loss),
+        };
+
+        // Params are already uploaded and stored in the session, use the paramsIpfsId from receipt
+        const paramsIpfs = await prisma.ipfsObject.findUnique({
+            where: { id: paramsReceiptJwt.paramsIpfsId }
+        });
+
+        if (!paramsIpfs) {
+            res.status(404).json({ error: { message: 'Parameters IPFS object not found. Please re-upload parameters.' } });
+            return;
+        }
+
+        const commit = await prisma.$transaction(async (tx) => {
+            // Prevent race: ensure no duplicate proof exists
+            if (zkmlRelationInput) {
+                const duplicateProof = await tx.zKMLProof.findFirst({
+                    where: {
+                        proofIpfsId: zkmlRelationInput.create.proofIpfsId,
+                        settingsIpfsId: zkmlRelationInput.create.settingsIpfsId,
+                        verificationKeyIpfsId: zkmlRelationInput.create.verificationKeyIpfsId
+                    }
+                });
+
+                if (duplicateProof) {
+                    throw new Error('ZKML Proof combination already exists in database.');
+                }
+            }
+
+            const paramsCreateInput: any = {
+                ipfsObjectId: paramsIpfs.id
+            };
+            if (zkmlRelationInput) {
+                paramsCreateInput.ZKMLProof = zkmlRelationInput;
+            }
+
+            const newCommit = await tx.commit.create({
+                data: {
+                    committerAddress: pk,
+                    message,
+                    metrics: metricsFinal,
+                    branchId,
+                    commitHash,
+                    status: 'MERGED',
+                    verified: !!zkmlRelationInput,
+                    architecture,
+                    paramHash,
+                    params: {
+                        create: paramsCreateInput,
+                    },
+                    committerId: committer.id
+                },
+                include: {
+                    params: {
+                        include: { ZKMLProof: true }
+                    }
+                }
+            });
+
+            await tx.branch.update({ where: { id: branchId }, data: { updatedAt: new Date() } });
+            await tx.repository.update({ where: { id: repoId }, data: { updatedAt: new Date() } });
+            await tx.commitCreationSession.update({ where: { id: sessionId }, data: { consumed: true, status: 'FINALIZED' } });
+            return newCommit;
+        });
+
+        res.status(201).json({ data: commit });
+
+    } catch (error: any) {
+        console.error('Error creating commit:', error);
+
+        // Cleanup orphaned ZKML files using session-stored IDs
+        try {
+            const session = await prisma.commitCreationSession.findUnique({
+                where: { id: sessionId }
+            });
+
+            if (session?.zkmlProofIpfsId && session?.zkmlSettingsIpfsId && session?.zkmlVkIpfsId) {
+                const [proofObj, settingsObj, vkObj] = await Promise.all([
+                    prisma.ipfsObject.findUnique({ where: { id: session.zkmlProofIpfsId } }),
+                    prisma.ipfsObject.findUnique({ where: { id: session.zkmlSettingsIpfsId } }),
+                    prisma.ipfsObject.findUnique({ where: { id: session.zkmlVkIpfsId } })
+                ]);
+
+                if (proofObj && settingsObj && vkObj) {
+                    console.log('Cleaning up orphaned ZKML files from IPFS...');
+                    await Promise.all([
+                        storageProvider.remove(proofObj.cid),
+                        storageProvider.remove(settingsObj.cid),
+                        storageProvider.remove(vkObj.cid)
+                    ]);
+
+                    // Also delete the IpfsObject DB records
+                    await Promise.all([
+                        prisma.ipfsObject.delete({ where: { id: proofObj.id } }).catch(() => { }),
+                        prisma.ipfsObject.delete({ where: { id: settingsObj.id } }).catch(() => { }),
+                        prisma.ipfsObject.delete({ where: { id: vkObj.id } }).catch(() => { })
+                    ]);
+
+                    console.log('Successfully removed orphaned ZKML files and DB records.');
+                }
+            }
+        } catch (cleanupErr) {
+            console.error('Error cleaning up ZKML files:', cleanupErr);
+        }
+
+        // Cleanup orphaned params file from IPFS if it was uploaded but commit creation failed
+        if (paramsCid) {
+            try {
+                console.log('Cleaning up orphaned parameters file from IPFS...');
+                await storageProvider.remove(paramsCid);
+                console.log('Successfully removed orphaned parameters file.');
+            } catch (cleanupErr) {
+                console.error('Error cleaning up parameters file from IPFS:', cleanupErr);
+            }
+        }
+
+        if (error.message === 'ZKML Proof combination already exists in database.') {
+            res.status(409).json({ error: { message: error.message } });
+            return;
+        }
+        res.status(500).send({ error: { message: 'Internal Server Error' } });
+    }
+});
+
+
+
+// the shared folder creation route goes here
+commitRouter.use('/sharedFolder/', sharedFolderRouter);
+
+// commit nft conversion route
+commitRouter.post('/hash/:commitHash/createNft', async (req, res, next) => {
+    try {
+        const { commitHash } = req.params;
+        const asset = await convertCommitToNft(umi, commitHash);
+        res.status(200).json({ data: asset });
+    }
+    catch (err) {
+        res.status(400).send({ error: { message: `${err}` } });
+        return;
+    }
+});
+
+// commit nft view route
+// not included in the current version
+// commitRouter.get('/hash/:commitHash/viewNft', async (req, res, next) => {
+//     try {
+//         const { commitHash } = req.params;
+//         const commit = await prisma.commit.findUnique({
+//             where: { commitHash },
+//             include: {
+//                 nft: true
+//             }
+//         });
+//         if (!commit) {
+//             res.status(400).send({ error: { message: 'Commit does not exist.' } });
+//             return;
+//         }
+//         if (!commit.nftId || !commit.nft || !commit.nft.signature || !commit.nft.merkleTreeAddress) {
+//             res.status(400).send({ error: { message: 'Commit is not an Nft' } });
+//             return;
+//         }
+
+//         const asset = await fetchCNftFromSignature(umi, commit.nft.merkleTreeAddress, commit.nft.signature);
+//         // const asset = await fetchCnft(umi, commit.nft.assetId);
+
+//         res.status(200).json(asset);
+//     }
+//     catch (err) {
+//         res.status(400).send({ error: { message: `${err}` } });
+//         return;
+//     }
+// })
+
+export { commitRouter };

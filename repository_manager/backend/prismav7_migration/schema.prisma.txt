@@ -1,0 +1,278 @@
+generator client {
+  provider      = "prisma-client"
+  // binaryTargets = ["native", "windows", "linux-musl-openssl-3.0.x"]
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mongodb"
+}
+
+// commits submitted need to to be verified by the user before it becomes merged
+// in this version, commits are automatically MERGED
+enum CommitStatus {
+  PENDING
+  REJECTED
+  MERGED
+}
+
+// three possible commit policies for commit overlapping
+enum CommitPolicy {
+  SERIAL
+  FORK
+  MERGE
+}
+
+// user model needed to be created
+model User {
+  id                String        @id @default(auto()) @map("_id") @db.ObjectId
+  username          String?       @unique
+  metadata          UserMetadata? // the metadata to be displayed for the user, by default not required
+  wallet            String        @unique // walet address of the user
+  repositories      Repository[] // repositories created by the user
+  commits           Commit[] // commits created by the user
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @default(now())
+  nftCredit         Int           @default(100)
+  lastCreditUpdated DateTime      @default(now())
+}
+
+model Repository {
+  id             String             @id @default(auto()) @map("_id") @db.ObjectId
+  name           String // name of the repository needs to be mandatorily as a main parameter
+  repoHash       String             @unique
+  branches       Branch[] // a single repository might contain serveral branches
+  writeAccessIds String[]           @default([]) // list of wallet addresses of the contribtors who can write to the repository. Iniitialized with the wallet addrdess of the creator
+  adminIds       String[]           @default([]) // list of admins that can give and revoke write permissions and delete the repository
+  contributorIds String[]           @default([]) // initialized
+  metadata       RepositoryMetdata? // optional metadata that needs to be added
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @default(now()) // timestamp of the latest update
+  // the owner of the repository
+  ownerAddress   String
+  ownerId        String             @db.ObjectId
+  owner          User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  // base model stored as an IpfsObject
+  baseModelHash  String?            @unique // the base model hash can be used to check if the base model is already present
+  baseModelId    String?            @db.ObjectId
+  baseModel      IpfsObject?        @relation("RepositoryBaseModel", fields: [baseModelId], references: [id])
+  // the base model CID can be fetched from `baseModel.cid`
+  collection     Collection?        @relation(fields: [collectionId], references: [id])
+  collectionId   String?            @unique @db.ObjectId
+  // the commit policy routes
+  commitPolicy   CommitPolicy       @default(MERGE)
+
+  @@unique([ownerAddress, name])
+}
+
+// repository contains branches
+model Branch {
+  id             String             @id @default(auto()) @map("_id") @db.ObjectId
+  name           String // name of the branch
+  branchHash     String             @unique
+  description    String? // description of the branch's purpose
+  latestParamsId String?            @db.ObjectId // points to IpfsObject containing latest params
+  latestParams   IpfsObject?        @relation("BranchLatestParams", fields: [latestParamsId], references: [id]) // reference to IPFS object for latest params
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @default(now()) // timestamp of the last commit
+  commits        Commit[] // commits in that branch
+  // the repository to which the branch belongs
+  repositoryId   String             @db.ObjectId // repository id for this branch
+  repository     Repository         @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  SharedFolder   SharedFolderFile[] // shared folder is basically an array of shared folder files
+}
+
+// branches contain commits
+// a single commit happens from only a single person
+// not like the way currently federated learning happens
+model Commit {
+  id                String       @id @default(auto()) @map("_id") @db.ObjectId
+  commitHash        String       @unique // hash of the current commit
+  previousCommitHash String      @default("_GENESIS_COMMIT_") // parent commit hash; first commit uses _GENESIS_COMMIT_
+  status            CommitStatus // the status of this particuar commit
+  rejectedMessage   String? // (Optional) Fwhy the commit was rejected in case it was rejected.  
+  message           String // commit message
+  paramHash         String       @unique // hash of the parmeters for the commit
+  params            Params? // the param is stored as a separate model
+  createdAt         DateTime     @default(now()) // when the commit was created  
+  statusUpdatedAt   DateTime?    @default(now()) // when the status was last updated
+  // for the current version the metric is an optional field
+  metrics           Metric? // the metrics of the model (e.g. accuracy, loss etc.)
+  architecture      String // new field included
+  // which branch the commit belongs to
+  branchId          String       @db.ObjectId
+  // when the branch is deleted so are the commmits in the branch
+  branch            Branch       @relation(fields: [branchId], references: [id])
+  committerAddress  String // wallet address of the contributor  
+  // when the user is deleted the commit is not deleted
+  committerId       String       @db.ObjectId
+  committer         User         @relation(fields: [committerId], references: [id])
+  isDeleted         Boolean      @default(false) // a commit is only soft deleted
+  // Nft converted commit properties
+  nft               Nft?         @relation("CommitToNft", fields: [nftId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  nftId             String?      @unique @db.ObjectId
+  verified          Boolean      @default(false) // if the ZKML proof of the model has been verified
+
+  @@unique([branchId, previousCommitHash])
+}
+
+// the parameters are going to be a large file so its better to store in in its own schema
+model Params {
+  id           String     @id @default(auto()) @map("_id") @db.ObjectId
+  ipfsObjectId String     @unique @db.ObjectId
+  ipfsObject   IpfsObject @relation("ParamsIpfs", fields: [ipfsObjectId], references: [id])
+  // sharedFolderId   String            @unique @db.ObjectId
+  // sharedFolderFile SharedFolderFile? @relation(fields: [sharedFolderId], references: [id]) // points to the shared folder file
+  commitId     String     @unique @db.ObjectId // needs to be unique for a one to one relationship
+  commit       Commit     @relation(fields: [commitId], references: [id])
+  ZKMLProof    ZKMLProof? @relation("paramToProof", fields: [zkmlProofId], references: [id], onDelete: SetNull)
+  zkmlProofId  String?    @unique @db.ObjectId
+}
+
+// the shared folder file is going to be deleted for v2
+// defining the shared folder model for storing the latest training data
+model SharedFolderFile {
+  id                         String   @id @default(auto()) @map("_id") @db.ObjectId
+  branchId                   String   @db.ObjectId
+  // when the branch is deleted so are the commmits in the branch
+  branch                     Branch   @relation(fields: [branchId], references: [id])
+  // params                     Params? // back relation to the params object, non included shared folders in commits will not have the params property fulled
+  committerAddress           String // who has done the training
+  metrics_after_aggregation  Bytes[] // bytes array for the metrics before aggregation
+  metrics_before_aggregation Bytes[] // bytes array for the metrics after aggregation
+  // for the current version we are not storing the model after aggregation
+  model                      Bytes? // stores the pickled model of that file
+  createdAt                  DateTime @default(now()) // we always need the latest shared folder for this branch and this user
+}
+
+model ZKMLProof {
+  id                    String      @id @default(auto()) @map("_id") @db.ObjectId
+  proofIpfsId           String?     @unique @db.ObjectId
+  proof                 IpfsObject? @relation("proofIPFS", fields: [proofIpfsId], references: [id])
+  settingsIpfsId        String?     @unique @db.ObjectId
+  settings              IpfsObject? @relation("settingsIPFS", fields: [settingsIpfsId], references: [id])
+  verificationKeyIpfsId String?     @unique @db.ObjectId
+  verification_key      IpfsObject? @relation("verificationKeyIPFS", fields: [verificationKeyIpfsId], references: [id])
+  param                 Params?     @relation("paramToProof")
+  paramId               String?     @unique @db.ObjectId
+}
+
+// These schemas can never be deleted
+// merkleTree model that stores the current merkle tree adress and how many can be implemented
+// only admin accessible
+model MerkleTree {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  mintAuthority   String // public key of the wallet that has mint authority on this merkleTree
+  active          Boolean  @default(false) // if this is the current merkle tree that is being used
+  address         String   @unique // public key of the merkle tree
+  signature       String   @unique // signature of the merkle tree creation signature
+  secret          String   @unique // secret key of the merkle tree
+  assetIds        String[] @unique // the assetIds minted in this merkle tree
+  totalLeaves     Int // total leaves in the merkle tree
+  remainingLeaves Int // leaves remaining where NFTs can be minted
+  createdAt       DateTime @default(now())
+}
+
+// details for the nft collection i.e. a repository
+model Collection {
+  id          String      @id @default(auto()) @map("_id") @db.ObjectId
+  address     String      @unique
+  signature   String      @unique
+  privateKey  String      @unique
+  owner       String
+  repository  Repository?
+  nft         Nft[]
+  createdAt   DateTime    @default(now())
+  metadataCID String? // metadata of the collection uploaded to IPFS
+}
+
+// details of the nft
+model Nft {
+  id                String      @id @default(auto()) @map("_id") @db.ObjectId
+  assetId           String      @unique
+  merkleTreeAddress String
+  signature         String      @unique
+  owner             String
+  createdAt         DateTime    @default(now())
+  // back relation to the commit schema
+  commit            Commit?     @relation("CommitToNft")
+  collection        Collection? @relation(fields: [colectionId], references: [id])
+  colectionId       String      @unique @db.ObjectId
+  metadataCID       String? // CID of the metadata of the Nft uploaded to IPFS
+}
+
+type Metric {
+  accuracy Float
+  loss     Float
+}
+
+// metadata type as an embedded document
+type UserMetadata {
+  name         String?
+  email        String?
+  displayText  String?
+  profileImage String? // base 64 encoded image of the user
+  bio          String? // bio of the user
+}
+
+type RepositoryMetdata {
+  name        String
+  description String?
+  useCase     String?
+  creator     String // wallet address that has created the Repository
+  framework   String
+}
+
+// the ipfs object model for all the objects uploaded to ipfs
+model IpfsObject {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  cid       String   @unique // cid of the object
+  uri       String   @unique
+  createdAt DateTime @default(now())
+  extension String
+  size      Float
+
+  // back-relations
+  repositories           Repository[] @relation("RepositoryBaseModel")
+  branches               Branch[]     @relation("BranchLatestParams")
+  params                 Params[]     @relation("ParamsIpfs")
+  zkmlProofsProof        ZKMLProof[]  @relation("proofIPFS")
+  zkmlProofsSettings     ZKMLProof[]  @relation("settingsIPFS")
+  zkmlProofsVerification ZKMLProof[]  @relation("verificationKeyIPFS")
+}
+
+// Commit creation session for the three-step commit flow
+model CommitCreationSession {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  jti         String    @unique
+  pk          String
+  repoId      String?   @db.ObjectId
+  branchId    String?   @db.ObjectId
+  status      String    @default("INITIATED") // INITIATED | ZKML_VERIFIED | ZKML_UPLOADED | PARAMS_UPLOADED | FINALIZED | ERROR
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime?
+  lastErrorAt DateTime?
+  errorCount  Int       @default(0)
+  consumed    Boolean   @default(false)
+
+  // Track uploaded ZKML IPFS IDs for cleanup on failure
+  zkmlProofIpfsId    String? @db.ObjectId
+  zkmlSettingsIpfsId String? @db.ObjectId
+  zkmlVkIpfsId       String? @db.ObjectId
+
+  // Track uploaded params IPFS ID for cleanup on failure
+  paramsIpfsId String? @db.ObjectId
+}
+
+// Tracks users blocked from initiating commits for 2 minutes after errors
+model InitiationBlock {
+  pk           String   @id @map("_id")
+  blockedUntil DateTime
+  createdAt    DateTime @default(now())
+}
+
+// the base model data must also include its details now
+type BaseModelData {
+  extension String
+  size      Float
+}

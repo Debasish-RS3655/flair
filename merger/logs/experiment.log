@@ -1,0 +1,238 @@
+2025-04-23 00:05:26.605136: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-04-23 00:05:28.007126: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+__init__ called with directory=mybucket/experiment1, retry_sleep_time=3, max_retry=3 __init__ called
+2025-04-23 00:05:31.992482: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: SSE3 SSE4.1 SSE4.2 AVX AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+C:\Users\debas\AppData\Local\Programs\Python\Python310\lib\site-packages\keras\src\layers\reshaping\flatten.py:37: UserWarning: Do not pass an `input_shape`/`input_dim` argument to a layer. When using Sequential models, prefer using an `Input(shape)` object as the first layer in the model instead.
+  super().__init__(**kwargs)
+Epoch 1/5
+22/32 ━━━━━━━━━━━━━━━━━━━━ 0s 2ms/step - accuracy: 0.1045 - loss: 2.8601   get_raw_folder called with no parameters
+__init__ called with directory=mybucket\experiment1, retry_sleep_time=3, max_retry=3 __init__ called 
+__setitem__ called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00000.json, value_type=<class 'bytes'> __setitem__ called
+_delete_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00000.json _delete_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00000.json _get_success_flag_file called
+_put_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00000.json _put_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00000.json _get_success_flag_file called
+__setitem__ called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e __setitem__ called
+_delete_success_flag called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _delete_success_flag called
+_get_success_flag_file called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _get_success_flag_file called
+_put_success_flag called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _put_success_flag called
+_get_success_flag_file called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _get_success_flag_file called
+items called with no parameters
+get called with key=1604d635-9b9c-43e2-a97e-9031565380be, default=None get called
+_get_success_flag_file called with key=1604d635-9b9c-43e2-a97e-9031565380be _get_success_flag_file called
+get called with key=4e1f116f-2af5-4294-b48a-4e565785a769, default=None get called
+_get_success_flag_file called with key=4e1f116f-2af5-4294-b48a-4e565785a769 _get_success_flag_file called
+get called with key=5ad8257b-5986-4207-b5bf-62f67f0ad77b, default=None get called
+_get_success_flag_file called with key=5ad8257b-5986-4207-b5bf-62f67f0ad77b _get_success_flag_file called
+get called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e, default=None get called
+_get_success_flag_file called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _get_success_flag_file called
+get called with key=7c68ebb6-2095-4e43-bcb7-eaf6b0463972, default=None get called
+_get_success_flag_file called with key=7c68ebb6-2095-4e43-bcb7-eaf6b0463972 _get_success_flag_file called
+get called with key=870376a5-1436-4dcb-9878-46a42645d469, default=None get called
+_get_success_flag_file called with key=870376a5-1436-4dcb-9878-46a42645d469 _get_success_flag_file called
+get called with key=bc309100-9375-41c6-8f31-b159a4a24c98, default=None get called
+_get_success_flag_file called with key=bc309100-9375-41c6-8f31-b159a4a24c98 _get_success_flag_file called
+get called with key=f0daa4de-1675-400b-8d05-9c5bd9804fd1, default=None get called
+_get_success_flag_file called with key=f0daa4de-1675-400b-8d05-9c5bd9804fd1 _get_success_flag_file called
+WARNING flwr 2025-04-23 00:05:32,875 | fedavg.py:242 | No fit_metrics_aggregation_fn provided
+get_raw_folder called with no parameters
+__init__ called with directory=mybucket\experiment1, retry_sleep_time=3, max_retry=3 __init__ called
+__setitem__ called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00000.json, value_type=<class 'bytes'> __setitem__ called
+_delete_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00000.json _delete_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00000.json _get_success_flag_file called
+_put_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00000.json _put_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00000.json _get_success_flag_file called
+get_raw_folder called with no parameters
+__init__ called with directory=mybucket\experiment1, retry_sleep_time=3, max_retry=3 __init__ called
+WARNING:absl:You are saving your model as an HDF5 file via `model.save()` or `keras.saving.save_model(model)`. This file format is considered legacy. We recommend using instead the native Keras format, e.g. `model.save('my_model.keras')` or `keras.saving.save_model(model, 'my_model.keras')`.
+__setitem__ called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00000.h5, value_type=<class 'bytes'> __setitem__ called
+_delete_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00000.h5 _delete_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00000.h5 _get_success_flag_file called
+_put_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00000.h5 _put_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00000.h5 _get_success_flag_file called
+32/32 ━━━━━━━━━━━━━━━━━━━━ 1s 7ms/step - accuracy: 0.1011 - loss: 2.8548 - num_examples_fed: 8192.0000 - num_nodes_fed: 8.0000 - accuracy_fed: 0.3636 - loss_fed: 1.9065
+Epoch 2/5
+21/32 ━━━━━━━━━━━━━━━━━━━━ 0s 3ms/step - accuracy: 0.0970 - loss: 2.5927 get_raw_folder called with no parameters
+__init__ called with directory=mybucket\experiment1, retry_sleep_time=3, max_retry=3 __init__ called
+__setitem__ called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00001.json, value_type=<class 'bytes'> __setitem__ called
+_delete_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00001.json _delete_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00001.json _get_success_flag_file called
+_put_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00001.json _put_success_flag called     
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00001.json _get_success_flag_file called
+__setitem__ called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e __setitem__ called
+_delete_success_flag called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _delete_success_flag called
+_get_success_flag_file called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _get_success_flag_file called
+_put_success_flag called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _put_success_flag called
+_get_success_flag_file called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _get_success_flag_file called
+items called with no parameters
+get called with key=1604d635-9b9c-43e2-a97e-9031565380be, default=None get called
+_get_success_flag_file called with key=1604d635-9b9c-43e2-a97e-9031565380be _get_success_flag_file called
+get called with key=4e1f116f-2af5-4294-b48a-4e565785a769, default=None get called
+_get_success_flag_file called with key=4e1f116f-2af5-4294-b48a-4e565785a769 _get_success_flag_file called
+get called with key=5ad8257b-5986-4207-b5bf-62f67f0ad77b, default=None get called
+_get_success_flag_file called with key=5ad8257b-5986-4207-b5bf-62f67f0ad77b _get_success_flag_file called
+get called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e, default=None get called
+_get_success_flag_file called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _get_success_flag_file called
+get called with key=7c68ebb6-2095-4e43-bcb7-eaf6b0463972, default=None get called
+_get_success_flag_file called with key=7c68ebb6-2095-4e43-bcb7-eaf6b0463972 _get_success_flag_file called
+get called with key=870376a5-1436-4dcb-9878-46a42645d469, default=None get called
+_get_success_flag_file called with key=870376a5-1436-4dcb-9878-46a42645d469 _get_success_flag_file called
+get called with key=bc309100-9375-41c6-8f31-b159a4a24c98, default=None get called
+_get_success_flag_file called with key=bc309100-9375-41c6-8f31-b159a4a24c98 _get_success_flag_file called
+get called with key=f0daa4de-1675-400b-8d05-9c5bd9804fd1, default=None get called
+_get_success_flag_file called with key=f0daa4de-1675-400b-8d05-9c5bd9804fd1 _get_success_flag_file called
+get_raw_folder called with no parameters
+__init__ called with directory=mybucket\experiment1, retry_sleep_time=3, max_retry=3 __init__ called
+__setitem__ called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00001.json, value_type=<class 'bytes'> __setitem__ called
+_delete_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00001.json _delete_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00001.json _get_success_flag_file called
+_put_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00001.json _put_success_flag called      
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00001.json _get_success_flag_file called
+get_raw_folder called with no parameters
+__init__ called with directory=mybucket\experiment1, retry_sleep_time=3, max_retry=3 __init__ called 
+WARNING:absl:You are saving your model as an HDF5 file via `model.save()` or `keras.saving.save_model(model)`. This file format is considered legacy. We recommend using instead the native Keras format, e.g. `model.save('my_model.keras')` or `keras.saving.save_model(model, 'my_model.keras')`.
+__setitem__ called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00001.h5, value_type=<class 'bytes'> __setitem__ called
+_delete_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00001.h5 _delete_success_flag called    
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00001.h5 _get_success_flag_file called
+_put_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00001.h5 _put_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00001.h5 _get_success_flag_file called
+32/32 ━━━━━━━━━━━━━━━━━━━━ 0s 5ms/step - accuracy: 0.1013 - loss: 2.5810 - num_examples_fed: 8192.0000 - num_nodes_fed: 8.0000 - accuracy_fed: 0.3659 - loss_fed: 1.8715
+Epoch 3/5
+21/32 ━━━━━━━━━━━━━━━━━━━━ 0s 3ms/step - accuracy: 0.1347 - loss: 2.5744 get_raw_folder called with no parameters
+__init__ called with directory=mybucket\experiment1, retry_sleep_time=3, max_retry=3 __init__ called
+__setitem__ called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00002.json, value_type=<class 'bytes'> __setitem__ called
+_delete_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00002.json _delete_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00002.json _get_success_flag_file called
+_put_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00002.json _put_success_flag called     
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00002.json _get_success_flag_file called
+__setitem__ called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e __setitem__ called
+_delete_success_flag called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _delete_success_flag called
+_get_success_flag_file called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _get_success_flag_file called
+_put_success_flag called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _put_success_flag called
+_get_success_flag_file called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _get_success_flag_file called
+items called with no parameters
+get called with key=1604d635-9b9c-43e2-a97e-9031565380be, default=None get called
+_get_success_flag_file called with key=1604d635-9b9c-43e2-a97e-9031565380be _get_success_flag_file called
+get called with key=4e1f116f-2af5-4294-b48a-4e565785a769, default=None get called
+_get_success_flag_file called with key=4e1f116f-2af5-4294-b48a-4e565785a769 _get_success_flag_file called
+get called with key=5ad8257b-5986-4207-b5bf-62f67f0ad77b, default=None get called
+_get_success_flag_file called with key=5ad8257b-5986-4207-b5bf-62f67f0ad77b _get_success_flag_file called
+get called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e, default=None get called
+_get_success_flag_file called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _get_success_flag_file called
+get called with key=7c68ebb6-2095-4e43-bcb7-eaf6b0463972, default=None get called
+_get_success_flag_file called with key=7c68ebb6-2095-4e43-bcb7-eaf6b0463972 _get_success_flag_file called
+get called with key=870376a5-1436-4dcb-9878-46a42645d469, default=None get called
+_get_success_flag_file called with key=870376a5-1436-4dcb-9878-46a42645d469 _get_success_flag_file called
+get called with key=bc309100-9375-41c6-8f31-b159a4a24c98, default=None get called
+_get_success_flag_file called with key=bc309100-9375-41c6-8f31-b159a4a24c98 _get_success_flag_file called
+get called with key=f0daa4de-1675-400b-8d05-9c5bd9804fd1, default=None get called
+_get_success_flag_file called with key=f0daa4de-1675-400b-8d05-9c5bd9804fd1 _get_success_flag_file called
+get_raw_folder called with no parameters
+__init__ called with directory=mybucket\experiment1, retry_sleep_time=3, max_retry=3 __init__ called
+__setitem__ called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00002.json, value_type=<class 'bytes'> __setitem__ called
+_delete_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00002.json _delete_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00002.json _get_success_flag_file called
+_put_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00002.json _put_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00002.json _get_success_flag_file called
+get_raw_folder called with no parameters
+__init__ called with directory=mybucket\experiment1, retry_sleep_time=3, max_retry=3 __init__ called
+WARNING:absl:You are saving your model as an HDF5 file via `model.save()` or `keras.saving.save_model(model)`. This file format is considered legacy. We recommend using instead the native Keras format, e.g. `model.save('my_model.keras')` or `keras.saving.save_model(model, 'my_model.keras')`.
+__setitem__ called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00002.h5, value_type=<class 'bytes'> __setitem__ called
+_delete_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00002.h5 _delete_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00002.h5 _get_success_flag_file called
+_put_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00002.h5 _put_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00002.h5 _get_success_flag_file called
+32/32 ━━━━━━━━━━━━━━━━━━━━ 0s 5ms/step - accuracy: 0.1520 - loss: 2.5076 - num_examples_fed: 8192.0000 - num_nodes_fed: 8.0000 - accuracy_fed: 0.3775 - loss_fed: 1.8421
+Epoch 4/5
+20/32 ━━━━━━━━━━━━━━━━━━━━ 0s 3ms/step - accuracy: 0.1405 - loss: 2.5458 get_raw_folder called with no parameters
+__init__ called with directory=mybucket\experiment1, retry_sleep_time=3, max_retry=3 __init__ called 
+__setitem__ called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00003.json, value_type=<class 'bytes'> __setitem__ called
+_delete_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00003.json _delete_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00003.json _get_success_flag_file called
+_put_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00003.json _put_success_flag called     
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00003.json _get_success_flag_file called
+__setitem__ called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e __setitem__ called
+_delete_success_flag called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _delete_success_flag called
+_get_success_flag_file called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _get_success_flag_file called
+_put_success_flag called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _put_success_flag called
+_get_success_flag_file called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _get_success_flag_file called
+items called with no parameters
+get called with key=1604d635-9b9c-43e2-a97e-9031565380be, default=None get called
+_get_success_flag_file called with key=1604d635-9b9c-43e2-a97e-9031565380be _get_success_flag_file called
+get called with key=4e1f116f-2af5-4294-b48a-4e565785a769, default=None get called
+_get_success_flag_file called with key=4e1f116f-2af5-4294-b48a-4e565785a769 _get_success_flag_file called
+get called with key=5ad8257b-5986-4207-b5bf-62f67f0ad77b, default=None get called
+_get_success_flag_file called with key=5ad8257b-5986-4207-b5bf-62f67f0ad77b _get_success_flag_file called
+get called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e, default=None get called
+_get_success_flag_file called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _get_success_flag_file called
+get called with key=7c68ebb6-2095-4e43-bcb7-eaf6b0463972, default=None get called
+_get_success_flag_file called with key=7c68ebb6-2095-4e43-bcb7-eaf6b0463972 _get_success_flag_file called
+get called with key=870376a5-1436-4dcb-9878-46a42645d469, default=None get called
+_get_success_flag_file called with key=870376a5-1436-4dcb-9878-46a42645d469 _get_success_flag_file called
+get called with key=bc309100-9375-41c6-8f31-b159a4a24c98, default=None get called
+_get_success_flag_file called with key=bc309100-9375-41c6-8f31-b159a4a24c98 _get_success_flag_file called
+get called with key=f0daa4de-1675-400b-8d05-9c5bd9804fd1, default=None get called
+_get_success_flag_file called with key=f0daa4de-1675-400b-8d05-9c5bd9804fd1 _get_success_flag_file called
+get_raw_folder called with no parameters
+__init__ called with directory=mybucket\experiment1, retry_sleep_time=3, max_retry=3 __init__ called
+__setitem__ called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00003.json, value_type=<class 'bytes'> __setitem__ called
+_delete_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00003.json _delete_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00003.json _get_success_flag_file called
+_put_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00003.json _put_success_flag called      
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00003.json _get_success_flag_file called
+get_raw_folder called with no parameters
+__init__ called with directory=mybucket\experiment1, retry_sleep_time=3, max_retry=3 __init__ called
+WARNING:absl:You are saving your model as an HDF5 file via `model.save()` or `keras.saving.save_model(model)`. This file format is considered legacy. We recommend using instead the native Keras format, e.g. `model.save('my_model.keras')` or `keras.saving.save_model(model, 'my_model.keras')`.
+__setitem__ called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00003.h5, value_type=<class 'bytes'> __setitem__ called
+_delete_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00003.h5 _delete_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00003.h5 _get_success_flag_file called
+_put_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00003.h5 _put_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00003.h5 _get_success_flag_file called
+32/32 ━━━━━━━━━━━━━━━━━━━━ 0s 6ms/step - accuracy: 0.1634 - loss: 2.4628 - num_examples_fed: 8192.0000 - num_nodes_fed: 8.0000 - accuracy_fed: 0.3805 - loss_fed: 1.8337
+Epoch 5/5
+19/32 ━━━━━━━━━━━━━━━━━━━━ 0s 3ms/step - accuracy: 0.1361 - loss: 2.5448 get_raw_folder called with no parameters
+__init__ called with directory=mybucket\experiment1, retry_sleep_time=3, max_retry=3 __init__ called 
+__setitem__ called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00004.json, value_type=<class 'bytes'> __setitem__ called
+_delete_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00004.json _delete_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00004.json _get_success_flag_file called
+_put_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00004.json _put_success_flag called     
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_before_aggregation_00004.json _get_success_flag_file called
+__setitem__ called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e __setitem__ called
+_delete_success_flag called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _delete_success_flag called
+_get_success_flag_file called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _get_success_flag_file called
+_put_success_flag called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _put_success_flag called
+_get_success_flag_file called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _get_success_flag_file called
+items called with no parameters
+get called with key=1604d635-9b9c-43e2-a97e-9031565380be, default=None get called
+_get_success_flag_file called with key=1604d635-9b9c-43e2-a97e-9031565380be _get_success_flag_file called
+get called with key=4e1f116f-2af5-4294-b48a-4e565785a769, default=None get called
+_get_success_flag_file called with key=4e1f116f-2af5-4294-b48a-4e565785a769 _get_success_flag_file called
+get called with key=5ad8257b-5986-4207-b5bf-62f67f0ad77b, default=None get called
+_get_success_flag_file called with key=5ad8257b-5986-4207-b5bf-62f67f0ad77b _get_success_flag_file called
+get called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e, default=None get called
+_get_success_flag_file called with key=6efd7d3b-0378-483b-9f3e-ffffd372ac9e _get_success_flag_file called
+get called with key=7c68ebb6-2095-4e43-bcb7-eaf6b0463972, default=None get called
+_get_success_flag_file called with key=7c68ebb6-2095-4e43-bcb7-eaf6b0463972 _get_success_flag_file called
+get called with key=870376a5-1436-4dcb-9878-46a42645d469, default=None get called
+_get_success_flag_file called with key=870376a5-1436-4dcb-9878-46a42645d469 _get_success_flag_file called
+get called with key=bc309100-9375-41c6-8f31-b159a4a24c98, default=None get called
+_get_success_flag_file called with key=bc309100-9375-41c6-8f31-b159a4a24c98 _get_success_flag_file called
+get called with key=f0daa4de-1675-400b-8d05-9c5bd9804fd1, default=None get called
+_get_success_flag_file called with key=f0daa4de-1675-400b-8d05-9c5bd9804fd1 _get_success_flag_file called
+get_raw_folder called with no parameters
+__init__ called with directory=mybucket\experiment1, retry_sleep_time=3, max_retry=3 __init__ called
+__setitem__ called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00004.json, value_type=<class 'bytes'> __setitem__ called
+_delete_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00004.json _delete_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00004.json _get_success_flag_file called
+_put_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00004.json _put_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/metrics_after_aggregation_00004.json _get_success_flag_file called
+get_raw_folder called with no parameters
+__init__ called with directory=mybucket\experiment1, retry_sleep_time=3, max_retry=3 __init__ called
+WARNING:absl:You are saving your model as an HDF5 file via `model.save()` or `keras.saving.save_model(model)`. This file format is considered legacy. We recommend using instead the native Keras format, e.g. `model.save('my_model.keras')` or `keras.saving.save_model(model, 'my_model.keras')`.
+__setitem__ called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00004.h5, value_type=<class 'bytes'> __setitem__ called
+_delete_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00004.h5 _delete_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00004.h5 _get_success_flag_file called
+_put_success_flag called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00004.h5 _put_success_flag called
+_get_success_flag_file called with key=keras/6efd7d3b-0378-483b-9f3e-ffffd372ac9e/model_after_aggregation_00004.h5 _get_success_flag_file called
+32/32 ━━━━━━━━━━━━━━━━━━━━ 0s 7ms/step - accuracy: 0.1601 - loss: 2.4548 - num_examples_fed: 8192.0000 - num_nodes_fed: 8.0000 - accuracy_fed: 0.3801 - loss_fed: 1.8318

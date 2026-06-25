@@ -1,0 +1,10 @@
+{
+  "tasks": {
+    "cmp": "deno compile --allow-run --allow-net --allow-env --allow-write --allow-read --allow-ffi --include lib/spa -o flair src/main.ts && sudo mv flair.exe /c/Program\\ Files/flair",
+    "cmpl": "deno compile --allow-run --allow-net --allow-env --allow-write --allow-read --allow-ffi --target x86_64-unknown-linux-gnu -o flair src/main.ts"
+  },
+  "imports": {
+    "@cliffy/command": "jsr:@cliffy/command@^1.0.0-rc.7",
+    "@db/sqlite": "jsr:@db/sqlite@^0.12.0"
+  }
+}
