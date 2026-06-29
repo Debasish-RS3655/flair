@@ -1123,25 +1123,66 @@ flair reset --hard HEAD~1
 
 ## Directory structure (CLI)
 
+Here is the complete overview of the `.flair` directory structure:
 
-# Created in each repo after `flair init`
 ```bash
 .flair/
-   repo.json                # Remote repo snapshot used by clone/checkout
+	repo.json                # Remote repo snapshot used by clone/checkout
 	HEAD                     # Current branch pointer (name + branchHash)
 	branches.json            # Cached branch list for the repo
 	.local_commits/          # Local commits directory
 		<uuidv4>/              # Each commit has its own directory
-         commit.json          # Commit metadata (params, zkp, commitType, architectureHash, status)
+			commit.json          # Commit metadata (params, zkp, commitType, architectureHash, status)
 			params.pt|npz        # Extracted model weights (framework-dependent)
 			.delta_params/       # Delta parameters directory
 				delta.pt|npz       # Parameter differences from previous commit
 			proof.zlib           # Compressed ZK proof
 			verification_key.zlib  # Compressed VK
 			settings.zlib        # Compressed settings
-   .cache/                  # Per-branch cached artifacts (managed by checkout)
-		<branch>/              # Cached params/zkp files for that branch
+	.params/                 # Active parameter files for the current branch
+	.zkp/                    # Active ZKML proof and settings files for the current branch
+	.cache/                  # Per-branch cached artifacts (managed by checkout)
+		<branch_name>/         # Cached params/zkp files for that branch
+```
 
+The `.flair` directory manages local state, distinguishing between the active branch and cached branches.
+
+### 1. Current Branch Files
+The active branch you are currently working on has its files directly exposed in the `.flair` directory for immediate use:
+
+```bash
+.flair/
+	.local_commits/          # Local commits directory for the current state
+		<uuidv4>/              # Each commit has its own directory
+			commit.json          # Commit metadata (params, zkp, commitType, architectureHash, status)
+			params.pt|npz        # Extracted model weights (framework-dependent)
+			.delta_params/       # Delta parameters directory
+				delta.pt|npz       # Parameter differences from previous commit
+			proof.zlib           # Compressed ZK proof
+			verification_key.zlib  # Compressed VK
+			settings.zlib        # Compressed settings
+	.params/                 # Active parameter files for the current branch
+	.zkp/                    # Active ZKML proof and settings files for the current branch
+	HEAD                     # Current branch pointer (name + branchHash)
+```
+
+### 2. Other Branches (Cached Files)
+When you switch to a different branch using `flair checkout`, the CLI intelligently swaps out the current branch's artifacts and restores the target branch's files:
+
+```bash
+.flair/
+	.cache/                  # Per-branch cached artifacts (managed by checkout)
+		<branch_name>/         # Backed up .params and .zkp files for that branch
+```
+*(Note: To save space, the CLI is designed to only keep the artifacts of the 4 most recently used branches in this `.cache` directory).*
+
+### 3. Global Repository State
+
+```bash
+.flair/
+	repo.json                # Remote repo snapshot used by clone/checkout
+	branches.json            # Cached branch list for the repo
+```
 # Repo settings file in project root
 config.yaml               # Repo settings (commitRetentionLimit)
 
