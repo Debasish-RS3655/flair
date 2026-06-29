@@ -1285,3 +1285,24 @@ The CLI enforces a strict sequential workflow to prevent incomplete commits:
    - Merge-style delta application across differing architectures is rejected
 
 This ensures every commit is complete and prevents accidental overwrites.
+
+## Local Merging Architecture (Shared Folder)
+
+Flair utilizes a sophisticated local merging architecture to combine machine learning models from distributed contributors. Instead of performing heavy mathematical aggregations on a central server, Flair decentralizes the merging process to the user's local machine using a "Git-like" philosophy.
+
+### How It Works
+
+1. **Local Folder Strategy (`flwr_serverless`)**: When a user runs `flair merge create`, the CLI initializes a temporary `LocalFolder` acting as a localized shared directory.
+2. **Sibling Commit Discovery**: The CLI scans the local repository for sibling commits (commits sharing the same parent and architecture).
+3. **AsyncFederatedNode Integration**: The parameters of the eligible sibling commits are parsed and injected as `Aggregatable` objects into a `flwr_serverless` `AsyncFederatedNode`.
+4. **Federated Averaging (FedAvg)**: The node performs a synchronous `FedAvg` operation, combining the weights mathematically based on the number of training examples in each sibling commit.
+5. **Artifact Generation**: The resulting global model is extracted and saved as a merge candidate in the `.flair/.merge_candidates/` directory.
+
+### Why Local Merging?
+
+- **True Decentralization**: Offloads the immense compute and RAM requirements of aggregating large neural networks from the central Repository Manager to the client edges.
+- **Scalability**: By bypassing the backend for the aggregation math, the system scales naturally without crashing the central API under heavy synchronous load.
+- **Fault Tolerance & Safety**: Merges are sandboxed on the local machine. Network drops during a merge do not result in orphaned states on the server.
+- **Standard Git Workflow**: Instead of a "magic" remote API call, users can inspect their `.merge_candidates/` locally before staging (`flair add`), finalizing (`flair commit`), and uploading the merged commit (`flair push`).
+
+By treating merged models simply as standard commits with `commitType: "MERGER"`, the backend Repository Manager is entirely free from complex merging logic, serving exclusively as a fast, secure storage layer.

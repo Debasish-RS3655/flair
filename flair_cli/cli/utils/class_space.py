@@ -77,9 +77,9 @@ def load_class_space_from_file(file_path: Path) -> list[str]:
     return canonicalize_class_space(labels)
 
 
-def save_repo_class_space(flair_dir: Path, class_space: list[str]) -> Path:
-    """Persist repository class-space contract to .flair/class_space.yaml."""
-    output = flair_dir / DEFAULT_CLASS_SPACE_FILE
+def save_branch_class_space(flair_dir: Path, branch_name: str, class_space: list[str]) -> Path:
+    """Persist branch class-space contract."""
+    output = flair_dir / f"class_space_{branch_name}.yaml"
     payload = {
         "classes": class_space,
         "classSpaceHash": compute_class_space_hash(class_space),
@@ -88,9 +88,9 @@ def save_repo_class_space(flair_dir: Path, class_space: list[str]) -> Path:
     return output
 
 
-def load_repo_class_space(flair_dir: Path) -> list[str] | None:
-    """Load repository class-space contract from .flair/class_space.yaml."""
-    file_path = flair_dir / DEFAULT_CLASS_SPACE_FILE
+def load_branch_class_space(flair_dir: Path, branch_name: str) -> list[str] | None:
+    """Load branch class-space contract."""
+    file_path = flair_dir / f"class_space_{branch_name}.yaml"
     if not file_path.exists():
         return None
     return load_class_space_from_file(file_path)
@@ -110,33 +110,33 @@ def parse_class_space_option(classes: str | None) -> list[str] | None:
 
 def ensure_class_space_contract(
     flair_dir: Path,
+    branch_name: str,
     provided_class_space: list[str] | None,
-) -> tuple[list[str], str, bool]:
+) -> tuple[list[str], str, bool, bool]:
     """
-    Resolve and enforce repository class-space contract.
+    Resolve and enforce branch class-space contract.
 
-    Returns: (class_space, class_space_hash, contract_created)
+    Returns: (class_space, class_space_hash, contract_created, new_branch_needed)
     """
-    repo_class_space = load_repo_class_space(flair_dir)
+    branch_class_space = load_branch_class_space(flair_dir, branch_name)
 
     if provided_class_space is None:
-        if repo_class_space is None:
+        if branch_class_space is None:
             raise ValueError(
                 "Class space is required. Provide --classes or --class-space-file on first params extraction."
             )
-        class_space = repo_class_space
+        class_space = branch_class_space
         contract_created = False
+        new_branch_needed = False
     else:
         class_space = canonicalize_class_space(provided_class_space)
         contract_created = False
+        new_branch_needed = False
 
-        if repo_class_space is None:
-            save_repo_class_space(flair_dir, class_space)
+        if branch_class_space is None:
+            save_branch_class_space(flair_dir, branch_name, class_space)
             contract_created = True
-        elif repo_class_space != class_space:
-            raise ClassSpaceMismatch(
-                "Class-space contract violation: provided classes differ from repository class space. "
-                "Create a new branch or checkpoint lineage for a new class space."
-            )
+        elif branch_class_space != class_space:
+            new_branch_needed = True
 
-    return class_space, compute_class_space_hash(class_space), contract_created
+    return class_space, compute_class_space_hash(class_space), contract_created, new_branch_needed

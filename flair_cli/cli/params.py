@@ -382,6 +382,14 @@ def create(
             console.print("[red]Invalid commit data.[/red]")
             raise typer.Exit(code=1)
         
+        from .branch import _get_current_branch, _get_current_repo, api_client, _update_branches_cache, checkout
+        current_branch_data = _get_current_branch()
+        if not current_branch_data:
+            console.print("[red]No current branch found.[/red]")
+            raise typer.Exit(code=1)
+            
+        branch_name = current_branch_data.get("currentBranch")
+
         # Resolve class-space contract before extracting parameters.
         provided_class_space = parse_class_space_option(classes)
         if class_space_file:
@@ -392,8 +400,9 @@ def create(
             provided_class_space = file_labels
 
         try:
-            class_space, class_space_hash, contract_created = ensure_class_space_contract(
+            class_space, class_space_hash, contract_created, new_branch_needed = ensure_class_space_contract(
                 flair_dir,
+                branch_name,
                 provided_class_space,
             )
         except ClassSpaceMismatch as e:
@@ -403,8 +412,50 @@ def create(
             console.print(f"[red]✗ {e}[/red]")
             raise typer.Exit(code=1)
 
+        if new_branch_needed:
+            console.print("[yellow]New class space detected. Creating a new branch automatically...[/yellow]")
+            class_space_hash_short = compute_class_space_hash(class_space)[:8]
+            new_branch_name = f"{branch_name}-classes-{class_space_hash_short}"
+            
+            repo_info = _get_current_repo()
+            if not repo_info or not repo_info.get("repoHash"):
+                console.print("[red]Could not retrieve repo info.[/red]")
+                raise typer.Exit(code=1)
+                
+            repo_hash = repo_info["repoHash"]
+            try:
+                # Create the branch via API
+                api_client.create_branch(
+                    repo_hash,
+                    new_branch_name,
+                    current_branch_data.get("branchHash"),
+                    "Automatic branch for new class space"
+                )
+                console.print(f"✓ Branch '{new_branch_name}' created", style="green")
+                
+                # Refresh branches cache
+                branches = api_client.get_branches(repo_hash)
+                _update_branches_cache(branches)
+                
+                # Save the new class space for this branch
+                from .utils.class_space import save_branch_class_space
+                save_branch_class_space(flair_dir, new_branch_name, class_space)
+                
+                # Checkout the new branch
+                console.print(f"[dim]Switching to new branch '{new_branch_name}'...[/dim]")
+                checkout(new_branch_name)
+                
+                console.print("[green]✓ Automatically switched to new branch. Please run 'flair params create' again to extract parameters for the new branch.[/green]")
+                raise typer.Exit(code=0)
+                
+            except Exception as e:
+                if not isinstance(e, typer.Exit):
+                    console.print(f"[red]Failed to create automatic branch: {e}[/red]")
+                    raise typer.Exit(code=1)
+                raise
+
         if contract_created:
-            console.print("[green]✓ Created repository class-space contract in .flair/class_space.yaml[/green]")
+            console.print(f"[green]✓ Created branch class-space contract in .flair/class_space_{branch_name}.yaml[/green]")
 
         console.print(f"[dim]Class space: {class_space}[/dim]")
 
