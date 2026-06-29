@@ -33,6 +33,7 @@ Flair CLI is a local-first command-line tool for versioning trained machine lear
    - [Zero-Knowledge Proofs (ZKP)](#zero-knowledge-proofs-zkp)
    - [Finalize commit with message](#finalize-commit-with-message)
 - [Push Commits](#push-commits)
+- [Merge Commits](#merge-commits)
 - [Revert Commits](#revert-commits)
 - [Reset Commits](#reset-commits)
 - [Directory structure (CLI)](#directory-structure-cli)
@@ -917,6 +918,29 @@ flair push
 - **No retry loop in the same push**: user must run `flair push` again to continue
 - **No partial deletion**: remaining local commits are left untouched for later push
 - Shows clear error messages for failed commits (✗ Commit X: reason)
+
+## Merge Commits
+
+Flair allows you to aggregate sibling commits (commits sharing the same parent and architecture) into a single merged model using Federated Averaging (FedAvg).
+
+### Create a merge candidate
+Generates a local merge candidate by fetching models from sibling commits, aggregating them using `flwr_serverless` nodes in a temporary `LocalFolder`, and producing a merged artifact.
+
+```bash
+flair merge create --min-children 2 --strategy fedavg
+```
+
+**Options:**
+- `--min-children`: Minimum sibling commits required to trigger an aggregation (default: 2).
+- `--strategy`: The federated strategy to use (currently supports `fedavg`).
+- `--since-commit`: Optional override cursor hash to begin searching for siblings.
+
+**Behavior:**
+1. Scans `.flair/commits/` for finalized sibling commits.
+2. If enough mergeable commits are found, it initializes an `AsyncFederatedNode` connected to a `.flair/.temp_merge` temporary shared folder.
+3. Performs a mathematical `FedAvg` using the `Aggregatable` properties (weights scaled by number of training examples) of the commits.
+4. Generates a new artifact inside `.flair/.merge_candidates/<candidate_uuid>/`.
+5. Prompts the user to explicitly run `flair add` and `flair commit` to stage and finalize the merged model, ensuring full local review before performing a `flair push`.
 
 ## Revert Commits
 
