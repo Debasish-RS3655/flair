@@ -79,7 +79,8 @@ def load_class_space_from_file(file_path: Path) -> list[str]:
 
 def save_branch_class_space(flair_dir: Path, branch_name: str, class_space: list[str]) -> Path:
     """Persist branch class-space contract."""
-    output = flair_dir / f"class_space_{branch_name}.yaml"
+    output = flair_dir / "class_space" / branch_name / "class_space.yaml"
+    output.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "classes": class_space,
         "classSpaceHash": compute_class_space_hash(class_space),
@@ -90,7 +91,7 @@ def save_branch_class_space(flair_dir: Path, branch_name: str, class_space: list
 
 def load_branch_class_space(flair_dir: Path, branch_name: str) -> list[str] | None:
     """Load branch class-space contract."""
-    file_path = flair_dir / f"class_space_{branch_name}.yaml"
+    file_path = flair_dir / "class_space" / branch_name / "class_space.yaml"
     if not file_path.exists():
         return None
     return load_class_space_from_file(file_path)

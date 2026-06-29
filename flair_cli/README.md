@@ -1130,6 +1130,9 @@ Here is the complete overview of the `.flair` directory structure:
 	repo.json                # Remote repo snapshot used by clone/checkout
 	HEAD                     # Current branch pointer (name + branchHash)
 	branches.json            # Cached branch list for the repo
+	class_space/             # Class space contracts defined per branch
+		<branch_name>/         # Branch specific folder
+			class_space.yaml     # The class space contract
 	.local_commits/          # Local commits directory
 		<uuidv4>/              # Each commit has its own directory
 			commit.json          # Commit metadata (params, zkp, commitType, architectureHash, status)

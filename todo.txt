@@ -1,3 +1,1 @@
-1. build the merger with the shared folder architecture
-
 2. udate the ezkl libraries to prove and verify the entire commit history. which is currently incomplete

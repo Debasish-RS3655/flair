@@ -455,7 +455,7 @@ def create(
                 raise
 
         if contract_created:
-            console.print(f"[green]✓ Created branch class-space contract in .flair/class_space_{branch_name}.yaml[/green]")
+            console.print(f"[green]✓ Created branch class-space contract in .flair/class_space/{branch_name}/class_space.yaml[/green]")
 
         console.print(f"[dim]Class space: {class_space}[/dim]")
 
