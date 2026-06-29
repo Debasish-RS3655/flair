@@ -935,6 +935,14 @@ flair merge create --min-children 2 --strategy fedavg
 - `--strategy`: The federated strategy to use (currently supports `fedavg`).
 - `--since-commit`: Optional override cursor hash to begin searching for siblings.
 
+**Commit Selection Workflow (Star-Topology):**
+The merge command follows a strict star-topology logic rather than a deep sequential chain:
+1. **Find the Cursor:** It traverses local commits backward to find the very last merger commit (or Genesis if none exists).
+2. **Slice the Timeline:** It filters the list of local commits to only include those created *after* this cursor.
+3. **Group by Parent:** It groups these candidate commits by their `previousCommitHash`.
+4. **Select Sibling Commits:** It specifically isolates the group of commits whose parent is exactly the cursor commit. These are "sibling commits" that all branched from the same base model. 
+This ensures that the `flair merge` command averages peer contributors who trained on the same foundational weights, producing the next clear merger checkpoint.
+
 **Behavior:**
 1. Scans `.flair/commits/` for finalized sibling commits.
 2. If enough mergeable commits are found, it initializes an `AsyncFederatedNode` connected to a `.flair/.temp_merge` temporary shared folder.
