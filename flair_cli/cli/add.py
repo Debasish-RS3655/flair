@@ -80,8 +80,7 @@ def add():
             "classSpaceChanged": False,
             "mergeStrategy": None,
             "mergeParents": None,
-            "createdAt": None,
-            "status": "CREATED"
+            "createdAt": None
         }
         
         commit_file = commit_dir / "commit.json"

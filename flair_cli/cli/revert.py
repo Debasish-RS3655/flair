@@ -258,7 +258,6 @@ def revert(
             "zkp": zkp_info if zkp_copied else None,
             "message": message,
             "commitType": "CHECKPOINT",
-            "status": "FINALIZED",
             "createdAt": None,
             "previousCommitHash": current_head_hash,
             "metadata": {

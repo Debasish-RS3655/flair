@@ -92,3 +92,37 @@ def _get_all_local_commits() -> list[tuple[dict, Path]]:
                 continue
 
     return commits
+
+
+def _is_commit_complete(commit_data: dict, commit_dir: Path) -> bool:
+    """Check if a commit is complete (has params, ZKP, and finalized message)."""
+    # Check if message exists (finalized with flair commit -m)
+    if not commit_data.get("message"):
+        return False
+    
+    # Check if commitType exists (set during finalization)
+    if not commit_data.get("commitType"):
+        return False
+    
+    # Check if params exist
+    params_info = commit_data.get("params")
+    if not params_info or not params_info.get("file"):
+        return False
+    
+    params_file = commit_dir / params_info["file"]
+    if not params_file.exists():
+        return False
+    
+    # Check if ZKP files exist
+    zkp_info = commit_data.get("zkp")
+    if not zkp_info:
+        return False
+    
+    proof_file = commit_dir / zkp_info.get("proof_file", "proof.zlib")
+    vk_file = commit_dir / zkp_info.get("verification_key_file", "verification_key.zlib")
+    settings_file = commit_dir / zkp_info.get("settings_file", "settings.zlib")
+    
+    if not all([proof_file.exists(), vk_file.exists(), settings_file.exists()]):
+        return False
+    
+    return True

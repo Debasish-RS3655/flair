@@ -23,7 +23,7 @@ from flwr.server.strategy import FedAvg
 from flwr_serverless import AsyncFederatedNode, LocalFolder
 from flwr_serverless.federated_node.aggregatable import Aggregatable
 
-from .utils.local_commits import _get_all_local_commits
+from .utils.local_commits import _get_all_local_commits, _is_commit_complete
 from .utils.reconstruction import _reconstruct_params_from_checkpoint
 
 app = typer.Typer(help="Create lineage-based merge candidates")
@@ -31,7 +31,7 @@ console = Console()
 
 
 def _is_merge_eligible_commit(commit_data: dict[str, Any], commit_dir: Path) -> bool:
-    if commit_data.get("status") != "FINALIZED":
+    if not _is_commit_complete(commit_data, commit_dir):
         return False
 
     if not commit_data.get("message"):
