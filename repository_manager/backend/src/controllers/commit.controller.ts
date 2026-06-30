@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma/index.js';
+import { CommitStatus } from '@prisma/client';
 import { authorizedPk } from '../middleware/auth/authHandler.js';
 import storageProvider from '../lib/storage/index.js';
 import { constructIPFSUrl } from '../lib/ipfs/ipfs.js';
@@ -1295,6 +1296,16 @@ export const createCommitNft = async (req: Request, res: Response, next: any) =>
 
         if (commit.nft) {
             res.status(409).send({ error: { message: 'This commit has already been minted as an NFT.' } });
+            return;
+        }
+
+        if (commit.status === CommitStatus.REJECTED) {
+            res.status(400).send({ error: { message: 'Rejected commit cannot be converted into an Nft.' } });
+            return;
+        }
+
+        if (commit.status === CommitStatus.MERGER) {
+            res.status(400).send({ error: { message: 'Commit is a merger commit, and cannot be converted into an Nft.' } });
             return;
         }
 

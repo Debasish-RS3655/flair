@@ -2,22 +2,27 @@
 // Debashish Buragohain
 
 
-
 // MIGRATION: prisma v7 migration syntax
 // import { Commit, Repository, Prisma.JsonValue as JsonValue } from "../../generated/prisma/client.js";
 
 // prisma v6 migration syntax
 import { Commit, Repository } from "@prisma/client";
+import { CommitStatus } from "@prisma/client";
 import { JsonValue } from "@prisma/client/runtime/library";
 
 import { commitMetrics, CommitNftMetdata } from "../types/commit";
 import { prisma } from "../prisma/index.js";
 // Use the exported Prisma.JsonValue type instead of the runtime path
 import { RepositoryMetadataWithAllRequiredFields, RepositoryMetdata, RepositoryNftCollectionMetadata } from "../types/repo";
-import { constructIPFSUrl } from "../../lib/ipfs/ipfs.js"; 
+import { constructIPFSUrl } from "../../lib/ipfs/ipfs.js";
 
 // function to create the metadata of the commit Nft
 export const createCommitMetadata = async (commit: Commit): Promise<CommitNftMetdata> => {
+
+    if (commit.status == CommitStatus.REJECTED) {
+        throw new Error('Rejected commit cannot be converted into an Nft.');
+    }
+
     const metadata: Partial<CommitNftMetdata> = {};
     metadata.commitHash = commit.commitHash;
 
@@ -38,23 +43,18 @@ export const createCommitMetadata = async (commit: Commit): Promise<CommitNftMet
     if (!repo.baseModelHash) {
         throw new Error("Commit's base model does not exist.");
     }
-    metadata.baseModelHash = repo.baseModelHash;    
+    metadata.baseModelHash = repo.baseModelHash;
 
     // the merger commit is removed in v2 but the logic will be applied for check point commits in the near future
-    // if (commit.status == 'MERGERCOMMIT') {
-    //     throw new Error('Commit is a merger commit, and cannot be converted into an Nft.');
-    // }
+    if (commit.status == CommitStatus.MERGER) {
+        throw new Error('Commit is a merger commit, and cannot be converted into an Nft.');
+    }
 
     metadata.status = commit.status;
     metadata.committer = commit.committerAddress;
     metadata.paramHash = commit.paramHash;
     metadata.message = commit.message;
-    // if (commit.status == 'REJECTED') {
-    //     if (!commit.rejectedMessage) {
-    //         throw new Error('Rejection message not present in rejected commit.');
-    //     }
-    //     metadata.messageIfRejected = commit.rejectedMessage;
-    // }
+
     metadata.createdAt = commit.createdAt.toISOString();
     metadata.localMetrics = parseMetrics(commit.metrics);
     return metadata as CommitNftMetdata;
@@ -105,7 +105,7 @@ export const createRepositoryMetadata = async (repo: Repository): Promise<Reposi
         throw new Error('base model hash is a required field.');
     }
     metadata.baseModelHash = baseModelHash;
-    metadata.baseModelUri= constructIPFSUrl(baseModelHash);        // in the latest version we calculate the url dynamically
+    metadata.baseModelUri = constructIPFSUrl(baseModelHash);        // in the latest version we calculate the url dynamically
     return metadata as RepositoryNftCollectionMetadata;
 }
 

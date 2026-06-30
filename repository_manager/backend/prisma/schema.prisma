@@ -15,6 +15,7 @@ enum CommitStatus {
   PENDING
   REJECTED
   MERGED
+  MERGER
 }
 
 // three possible commit policies for commit overlapping
