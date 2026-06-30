@@ -4,6 +4,7 @@ import typer
 from rich.console import Console
 import httpx
 
+from ..api import client as api_client
 from ..api.utils import _base_url, _client_with_auth
 from ..core import session
 from .utils.local_commits import _get_all_local_commits, _get_flair_dir, _get_head_info
@@ -22,8 +23,11 @@ def _load_repo_config() -> dict:
     with open(config_file, 'r') as f:
         return json.load(f)
 
-@app.callback(invoke_without_command=True)
-def pull():
+@app.command()
+def pull(
+    branch_name: str = typer.Argument(None, help="Branch name to pull from"),
+    upstream: str = typer.Option(None, "-u", "--set-upstream", help="Remote name (default: origin)")
+):
     """Synchronize local commit statuses with the remote repository manager."""
     try:
         current_session = session.load_session()
@@ -38,9 +42,28 @@ def pull():
             raise typer.Exit(code=1)
 
         head_info = _get_head_info()
-        branch_hash = head_info.get("branchHash") if head_info else None
+        
+        target_branch_name = branch_name
+        if not target_branch_name:
+            if head_info:
+                target_branch_name = head_info.get("currentBranch")
+            else:
+                target_branch_name = "main"
+        
+        branch_hash = None
+        if not branch_name and head_info:
+            branch_hash = head_info.get("branchHash")
+            
         if not branch_hash:
-            console.print("[red]No branch hash found. Ensure you are on a branch.[/red]")
+            try:
+                branch_data = api_client.get_branch_by_name(repo_hash, target_branch_name)
+                if isinstance(branch_data, dict):
+                    branch_hash = branch_data.get("branchHash")
+            except Exception:
+                pass
+                
+        if not branch_hash:
+            console.print(f"[red]Branch '{target_branch_name}' not found on remote.[/red]")
             raise typer.Exit(code=1)
 
         all_local_commits = _get_all_local_commits()

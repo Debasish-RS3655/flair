@@ -919,6 +919,22 @@ flair push
 - **No partial deletion**: remaining local commits are left untouched for later push
 - Shows clear error messages for failed commits (✗ Commit X: reason)
 
+## Pull Commits
+
+### Pull commit statuses from remote repository
+Synchronizes the local commit statuses (`PENDING`, `MERGER`, `MERGED`, `REJECTED`) with the repository manager backend for a specific branch. Its usage is similar to `git pull`.
+
+**Features:**
+- **Branch Specific**: Operates on the current branch (using local `.flair/HEAD`) or a specified branch name.
+- **Smart Syncing**: Automatically determines the last known synchronized state (last `MERGER` or `MERGED` commit) as a cursor, and fetches updates for commits pushed since then.
+- **In-place updates**: Seamlessly updates the local `commit.json` files with the new remote statuses.
+
+```bash
+flair pull                          # Pull statuses for the current branch
+flair pull main                     # Pull statuses for the 'main' branch
+flair pull feature-branch -u origin # Specify upstream (optional)
+```
+
 ## Merge Commits
 
 Flair allows you to aggregate sibling commits (commits sharing the same parent and architecture) into a single merged model using Federated Averaging (FedAvg).
