@@ -6,7 +6,7 @@ from typing import Optional
 import typer
 from rich.console import Console
 
-from flair_cli.cli import auth, config, init, clone, basemodel, branch, add, zkp, push, params, new, commit, revert, reset, metrics, merge, status as status_cmd, log as log_cmd, diff as diff_cmd
+from flair_cli.cli import auth, config, init, clone, basemodel, branch, add, zkp, push, pull, params, new, commit, revert, reset, metrics, merge, status as status_cmd, log as log_cmd, diff as diff_cmd
 
 app = typer.Typer(help="Flair — model repository ledger CLI")
 console = Console()
@@ -26,6 +26,7 @@ app.add_typer(merge.app, name="merge", help="Create lineage-based merge candidat
 app.add_typer(zkp.app, name="zkp", help="Zero-Knowledge Proof operations")
 app.add_typer(commit.app, name="commit", help="Finalize commit with message and determine type")
 app.add_typer(push.app, name="push", help="Push commits to remote repository")
+app.add_typer(pull.app, name="pull", help="Pull latest commit statuses from remote")
 app.add_typer(revert.app, name="revert", help="Revert to previous commit")
 app.add_typer(reset.app, name="reset", help="Reset HEAD to previous local commit")
 

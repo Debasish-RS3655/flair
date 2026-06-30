@@ -575,7 +575,8 @@ def push(
                 response.raise_for_status()
                 finalize_data = response.json()
             
-            returned_commit_hash = finalize_data.get("data", {}).get("commitHash")
+            returned_commit_data = finalize_data.get("data", {})
+            returned_commit_hash = returned_commit_data.get("commitHash")
             if not returned_commit_hash:
                 console.print(f"[red]✗ Commit {idx}: Finalization failed[/red]")
                 console.print(f"[yellow]Stopping push after {pushed_count} successful commit(s).[/yellow]")
@@ -585,9 +586,10 @@ def push(
             console.print(f"  [dim]Hash: {returned_commit_hash[:16]}...[/dim]")
             console.print(f"  [dim]Type: {commit_type}[/dim]")
             
-            # Update local commit.json with server-returned authoritative hash
+            # Update local commit.json with server-returned authoritative hash and status
             # This ensures the local hash matches the server's canonical commit hash
             commit_data["commitHash"] = returned_commit_hash
+            commit_data["status"] = returned_commit_data.get("status")
             commit_file = commit_dir / "commit.json"
             try:
                 with open(commit_file, 'w') as f:

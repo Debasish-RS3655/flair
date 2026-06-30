@@ -9,6 +9,9 @@ const commitRouter = Router();
 // Get all commits for a specific branch
 commitRouter.get('/', commitController.getAllCommits);
 
+// Get commit statuses for syncing
+commitRouter.get('/status/sync', commitController.getCommitStatuses);
+
 // Complete info for the commit for pulling it
 commitRouter.get('/hash/:commitHash/pull', commitController.getCommitForPull);
 

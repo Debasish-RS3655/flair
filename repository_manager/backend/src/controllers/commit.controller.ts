@@ -1174,7 +1174,7 @@ export const finalizeCommit = async (req: Request, res: Response) => {
                     commitHash: computedCommitHash,
                     previousCommitHash: parentCommitHash,
                     commitType,
-                    status: 'MERGED',               // the status is set to MERGED directly for simplicity for now
+                    status: 'PENDING',
                     verified: !!zkmlRelationInput,
                     architecture,
                     paramHash,
@@ -1323,5 +1323,32 @@ export const createCommitNft = async (req: Request, res: Response, next: any) =>
     catch (err) {
         res.status(400).send({ error: { message: `${err}` } });
         return;
+    }
+};
+
+export const getCommitStatuses = async (req: Request, res: Response) => {
+    try {
+        const { branchId } = req;
+        const sinceCommitHash = req.query.since as string;
+        
+        let commits;
+        if (sinceCommitHash && sinceCommitHash !== '_GENESIS_COMMIT_') {
+            // Simply fetch all commits for this branch as it's not very heavy
+            // Client side logic can slice if needed, or we can just return all for sync.
+            commits = await prisma.commit.findMany({
+                where: { branchId },
+                select: { commitHash: true, status: true }
+            });
+        } else {
+            commits = await prisma.commit.findMany({
+                where: { branchId },
+                select: { commitHash: true, status: true }
+            });
+        }
+
+        res.status(200).json({ data: commits });
+    } catch (err) {
+        console.error('Error fetching commit statuses:', err);
+        res.status(500).send({ error: { message: 'Internal Server Error' } });
     }
 };
