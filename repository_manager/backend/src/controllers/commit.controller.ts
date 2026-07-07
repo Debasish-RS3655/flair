@@ -9,13 +9,13 @@ import config from '../../config.js';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidV4 } from 'uuid';
-import { createHash } from 'crypto';
+import { createHash, createPublicKey, verify as cryptoVerify } from 'crypto';
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
 import { ZKMLProofCreateObj } from '../lib/types/zkmlproof.js';
 import { convertCommitToNft } from '../lib/nft/nft.js';
 import { umi } from '../lib/nft/umi.js';
-import { resolveUserIdFromPrincipal } from '../lib/auth/identity/index.js';
+import { getSSHIdentityForPrincipal, isSSHPrincipal, resolveUserIdFromPrincipal } from '../lib/auth/identity/index.js';
 
 const ZKP_JWT_SECRET = process.env.ZKP_JWT_SECRET || 'super-secret-commit-generation';
 const COMMIT_JWT_SECRET = process.env.COMMIT_JWT_SECRET || 'another-super-secret-commit-generation';
@@ -90,15 +90,80 @@ function computeCommitHash(payload: CanonicalCommitPayload): string {
 // SSH-MIGRATION: generalize IdentityPublicKeyInfo for SSH public keys (OpenSSH format,
 // fingerprint, key type rsa/ed25519/ecdsa) instead of Solana base58 addresses.
 interface IdentityPublicKeyInfo {
-    publicKeyBytes: Uint8Array;  // Solana public key bytes for ED25519 verification
-    keyType: 'ed25519';
-    solanaAddress: string;       // base58-encoded Solana address
+    provider: 'WALLET' | 'SSH';
+    publicKeyBytes?: Uint8Array;  // Solana public key bytes for ED25519 verification
+    sshPublicKey?: string;        // OpenSSH ssh-ed25519 public key string
+}
+
+function decodeOpenSshEd25519PublicKey(publicKey: string): Uint8Array | null {
+    const trimmed = publicKey.trim();
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 2 || parts[0] !== 'ssh-ed25519') {
+        return null;
+    }
+
+    try {
+        const blob = Buffer.from(parts[1], 'base64');
+        let offset = 0;
+
+        const readUInt32 = () => {
+            if (offset + 4 > blob.length) return null;
+            const value = blob.readUInt32BE(offset);
+            offset += 4;
+            return value;
+        };
+
+        const readString = () => {
+            const length = readUInt32();
+            if (length === null || offset + length > blob.length) return null;
+            const value = blob.subarray(offset, offset + length);
+            offset += length;
+            return value;
+        };
+
+        const keyType = readString();
+        const keyBytes = readString();
+        if (!keyType || !keyBytes) return null;
+
+        if (keyType.toString('utf8') !== 'ssh-ed25519') {
+            return null;
+        }
+
+        return keyBytes;
+    } catch {
+        return null;
+    }
+}
+
+function openSshEd25519ToPem(publicKey: string): string | null {
+    const rawKeyBytes = decodeOpenSshEd25519PublicKey(publicKey);
+    if (!rawKeyBytes) return null;
+
+    const spkiPrefix = Buffer.from('302a300506032b6570032100', 'hex');
+    const der = Buffer.concat([spkiPrefix, Buffer.from(rawKeyBytes)]);
+    const base64 = der.toString('base64').match(/.{1,64}/g)?.join('\n');
+    if (!base64) return null;
+
+    return `-----BEGIN PUBLIC KEY-----\n${base64}\n-----END PUBLIC KEY-----\n`;
 }
 
 // SSH-MIGRATION: resolve commit-signing identity from SSH auth provider, not WALLET/Solana only.
 // Google-linked SSH keys and provider selection logic will need updating here.
 async function getUserPublicKeyInfo(pk: string): Promise<IdentityPublicKeyInfo | null> {
     try {
+        if (isSSHPrincipal(pk)) {
+            const sshIdentity = await getSSHIdentityForPrincipal(pk);
+            if (!sshIdentity) {
+                console.warn(`No SSH identity found for principal ${pk}`);
+                return null;
+            }
+
+            return {
+                provider: 'SSH',
+                sshPublicKey: sshIdentity.publicKey,
+            };
+        }
+
         // Find the user by principal
         const user = await prisma.user.findUnique({
             where: { principal: pk }
@@ -135,9 +200,8 @@ async function getUserPublicKeyInfo(pk: string): Promise<IdentityPublicKeyInfo |
         try {
             const publicKeyBytes = bs58.decode(pk);
             return {
+                provider: 'WALLET',
                 publicKeyBytes,
-                keyType: 'ed25519',
-                solanaAddress: pk
             };
         } catch (decodeErr) {
             console.error(`Failed to decode Solana address ${pk}:`, decodeErr);
@@ -154,22 +218,29 @@ async function getUserPublicKeyInfo(pk: string): Promise<IdentityPublicKeyInfo |
 // with CLI canonicalize_payload before verifying.
 function verifySignature(canonicalPayload: string, signatureHex: string, publicKeyInfo: IdentityPublicKeyInfo): boolean {
     try {
-        // Convert payload string to bytes
         const payloadBytes = Buffer.from(canonicalPayload, 'utf-8');
-        
-        // Convert signature from hex to bytes
-        const signatureBytes = Buffer.from(signatureHex, 'hex');
-        
-        // SSH-MIGRATION: signatureHex encoding may change (OpenSSH base64 blob vs raw hex).
-        // Verify ED25519 signature using tweetnacl
-        // nacl.sign.detached.verify returns true if signature is valid
-        const isValid = nacl.sign.detached.verify(
+
+        const signatureBytes = /^[0-9a-fA-F]+$/.test(signatureHex) && signatureHex.length % 2 === 0
+            ? Buffer.from(signatureHex, 'hex')
+            : Buffer.from(signatureHex, 'base64');
+
+        if (publicKeyInfo.provider === 'SSH') {
+            if (!publicKeyInfo.sshPublicKey) return false;
+
+            const pem = openSshEd25519ToPem(publicKeyInfo.sshPublicKey);
+            if (!pem) return false;
+
+            const publicKeyObject = createPublicKey(pem);
+            return cryptoVerify(null, payloadBytes, publicKeyObject, signatureBytes);
+        }
+
+        if (!publicKeyInfo.publicKeyBytes) return false;
+
+        return nacl.sign.detached.verify(
             payloadBytes,
             signatureBytes,
             publicKeyInfo.publicKeyBytes
         );
-        
-        return isValid;
     } catch (err) {
         console.error('Error verifying signature:', err);
         return false;
@@ -1037,7 +1108,7 @@ export const finalizeCommit = async (req: Request, res: Response) => {
         if (!publicKeyInfo) {
             res.status(401).json({ 
                 error: { 
-                    message: 'User cannot sign commits. Only WALLET-authenticated users (Solana) can create signed commits.' 
+                    message: 'User cannot sign commits. Only WALLET or SSH-authenticated users can create signed commits.' 
                 } 
             });
             return;

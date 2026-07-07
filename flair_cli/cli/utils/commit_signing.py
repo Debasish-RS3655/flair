@@ -1,29 +1,25 @@
 """
-Commit signing utilities for canonical payload construction and client-side signing.
+Commit signing utilities for canonical payload construction and SSH signing.
 
-SSH-MIGRATION (planned):
-- Keep: normalize_json_value, build_canonical_payload, canonicalize_payload,
-  compute_payload_hash, extract_jti_from_jwt (payload canonicalization is algorithm-agnostic).
-- Replace: get_solana_keypair_from_file, sign_canonical_payload, verify_keypair_matches_address
-  with SSH equivalents (e.g. ssh-agent, ~/.ssh/id_ed25519, OpenSSH signature format).
-- Remove Solana-specific deps (PyNaCl, base58) once SSH signing lands.
-- Align canonicalize_payload key ordering with server before switching algorithms
-  (client uses sort_keys=True; server uses insertion order — must match for any signer).
+The payload canonicalization logic is shared by all signing methods.
 """
 from __future__ import annotations
-import json
-import hashlib
 import base64
+import hashlib
+import json
+import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
-import base58
 
-try:
-    from nacl.signing import SigningKey
-    import nacl.bindings
-    HAS_NACL = True
-except ImportError:
-    HAS_NACL = False
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+
+@dataclass(frozen=True)
+class SSHKeypair:
+        private_key: Ed25519PrivateKey
+        public_key_openssh: str
 
 
 def normalize_json_value(value: Any) -> Any:
@@ -54,27 +50,29 @@ def build_canonical_payload(
     return {
         "sessionJti": session_jti,
         "signedAt": signed_at,
+        "paramsIpfsId": params_ipfs_id,
+        "paramHash": param_hash,
+        "previousCommitHash": previous_commit_hash,
         "architecture": architecture,
         "architectureHash": None,
         "commitType": commit_type,
         "message": message,
         "metrics": normalize_json_value(metrics or {}),
-        "paramHash": param_hash,
-        "paramsIpfsId": params_ipfs_id,
-        "previousCommitHash": previous_commit_hash,
     }
 
 
 def canonicalize_payload(payload: Dict[str, Any]) -> str:
     """
     Convert canonical payload to deterministic JSON string.
-    Uses sorted keys and no whitespace for exact server-side matching.
+    Uses the payload's explicit field order and no whitespace for exact server-side matching.
 
-    SSH-MIGRATION: reconcile sort_keys=True here with server canonicalizeCommitPayload
-    (insertion order) so SSH and Solana signers hash/sign identical bytes.
+    SSH-MIGRATION: keep this byte order aligned with server canonicalization
+    so SSH and Solana signers hash/sign identical bytes.
     """
-    normalized = normalize_json_value(payload)
-    return json.dumps(normalized, separators=(",", ":"), sort_keys=True)
+    payload_to_serialize = dict(payload)
+    if "metrics" in payload_to_serialize:
+        payload_to_serialize["metrics"] = normalize_json_value(payload_to_serialize["metrics"])
+    return json.dumps(payload_to_serialize, separators=(",", ":"), sort_keys=False)
 
 
 def compute_payload_hash(payload: Dict[str, Any]) -> str:
@@ -101,102 +99,102 @@ def extract_jti_from_jwt(token: str) -> Optional[str]:
         return None
 
 
-# SSH-MIGRATION: delete this function; SSH signing must not read Solana id.json or local secrets
-# in the CLI. Use ssh-agent / OpenSSH key paths instead (implementation TBD).
-def get_solana_keypair_from_file(keypair_path: Optional[str] = None) -> Optional[bytes]:
-    """
-    Load Solana keypair (private key bytes) from file.
-    Tries standard locations if not provided:
-    - ~/.config/solana/id.json
-    - SOLANA_KEYPAIR env var
-    - Provided path
-    
-    Returns: 64-byte secret key (private + public), or None if not found
-    """
-    if not HAS_NACL:
+def _default_ssh_private_key_paths() -> list[Path]:
+    home = Path.home()
+    return [
+        home / ".ssh" / "id_ed25519",
+        home / ".ssh" / "id_ecdsa",
+        home / ".ssh" / "id_rsa",
+    ]
+
+
+def _load_ssh_private_key(path: Path, passphrase: Optional[str] = None) -> Optional[Ed25519PrivateKey]:
+    try:
+        key_bytes = path.read_bytes()
+        password_bytes = passphrase.encode("utf-8") if passphrase else None
+        loaded = serialization.load_ssh_private_key(key_bytes, password=password_bytes)
+        if isinstance(loaded, Ed25519PrivateKey):
+            return loaded
+        return None
+    except Exception:
         return None
 
-    search_paths = []
-    
-    if keypair_path:
-        search_paths.append(Path(keypair_path))
-    
-    home = Path.home()
-    search_paths.append(home / ".config" / "solana" / "id.json")
-    
-    import os
-    env_path = os.getenv("SOLANA_KEYPAIR")
+
+def _extract_public_key_from_private_key(private_key: Ed25519PrivateKey) -> str:
+    public_key = private_key.public_key()
+    raw_public_bytes = public_key.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+
+    key_type = b"ssh-ed25519"
+    blob = (
+        len(key_type).to_bytes(4, "big") + key_type +
+        len(raw_public_bytes).to_bytes(4, "big") + raw_public_bytes
+    )
+    return f"ssh-ed25519 {base64.b64encode(blob).decode('ascii')}"
+
+
+def _compute_ssh_principal(public_key_openssh: str) -> Optional[str]:
+    parts = public_key_openssh.strip().split()
+    if len(parts) < 2 or parts[0] != "ssh-ed25519":
+        return None
+
+    try:
+        blob = base64.b64decode(parts[1].encode("ascii"), validate=True)
+    except Exception:
+        return None
+
+    fingerprint = base64.b64encode(hashlib.sha256(blob).digest()).decode("ascii").rstrip("=")
+    return f"ssh:SHA256:{fingerprint}"
+
+
+def get_ssh_keypair_from_file(key_path: Optional[str] = None) -> Optional[SSHKeypair]:
+    """Load an SSH private key from disk and return its OpenSSH public key string."""
+    search_paths: list[Path] = []
+
+    if key_path:
+        search_paths.append(Path(key_path).expanduser())
+
+    env_path = os.getenv("FLAIR_SSH_KEY_PATH")
     if env_path:
-        search_paths.append(Path(env_path))
-    
+        search_paths.append(Path(env_path).expanduser())
+
+    search_paths.extend(_default_ssh_private_key_paths())
+
+    seen_paths: set[Path] = set()
     for path in search_paths:
-        if path.exists():
-            try:
-                with open(path, "r") as f:
-                    keypair_data = json.load(f)
-                
-                if isinstance(keypair_data, list):
-                    # Solana keypair format is [u8; 64]
-                    secret_key_bytes = bytes(keypair_data)
-                    if len(secret_key_bytes) == 64:
-                        return secret_key_bytes
-            except Exception as e:
-                continue
-    
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+
+        if not path.exists():
+            continue
+
+        passphrase = os.getenv("FLAIR_SSH_KEY_PASSPHRASE") or os.getenv("SSH_ASKPASS_PASSWORD")
+        private_key = _load_ssh_private_key(path, passphrase)
+        if not private_key:
+            continue
+
+        return SSHKeypair(
+            private_key=private_key,
+            public_key_openssh=_extract_public_key_from_private_key(private_key),
+        )
+
     return None
 
 
-# SSH-MIGRATION: replace with sign_canonical_payload_ssh(payload) using OpenSSH/ssh-agent.
-# Output encoding (hex vs base64) must match backend verifySignature after migration.
-def sign_canonical_payload(
-    payload: Dict[str, Any],
-    secret_key_bytes: bytes
-) -> Optional[str]:
-    """
-    Sign canonical payload using Solana ED25519 private key.
-    
-    Args:
-        payload: Canonical commit payload
-        secret_key_bytes: 64-byte Solana keypair (private + public)
-    
-    Returns: Hex-encoded signature, or None on error
-    """
-    if not HAS_NACL:
-        return None
-    
+def sign_canonical_payload(payload: Dict[str, Any], keypair: SSHKeypair) -> Optional[str]:
+    """Sign canonical payload using an SSH Ed25519 private key and return a hex signature."""
     try:
         canonical_json = canonicalize_payload(payload)
-        payload_bytes = canonical_json.encode("utf-8")
-        
-        # Extract private key (first 32 bytes of Solana keypair)
-        signing_key = SigningKey(secret_key_bytes[:32])
-        
-        # Sign using detached signature (no message prepended)
-        signature = nacl.bindings.crypto_sign_detached(payload_bytes, bytes(signing_key))
-        
-        # Return as hex string
+        signature = keypair.private_key.sign(canonical_json.encode("utf-8"))
         return signature.hex()
-    except Exception as e:
+    except Exception:
         return None
 
 
-# SSH-MIGRATION: replace with verify_ssh_key_matches_identity(private_key, principal/fingerprint).
-def verify_keypair_matches_address(secret_key_bytes: bytes, solana_address: str) -> bool:
-    """
-    Verify that the given keypair's public key matches the Solana address.
-    Helps catch keypair mismatch errors early.
-    """
-    if not HAS_NACL:
-        return False
-    
-    try:
-        # Extract private key and get public key
-        signing_key = SigningKey(secret_key_bytes[:32])
-        public_key_bytes = bytes(signing_key.verify_key)
-        
-        # Encode as base58
-        public_key_b58 = base58.encode(public_key_bytes).decode("utf-8")
-        
-        return public_key_b58 == solana_address
-    except Exception as e:
-        return False
+def verify_ssh_keypair_matches_principal(keypair: SSHKeypair, principal: str) -> bool:
+    """Verify the loaded SSH keypair matches the authenticated SSH principal."""
+    expected_principal = _compute_ssh_principal(keypair.public_key_openssh)
+    return bool(expected_principal) and expected_principal == principal

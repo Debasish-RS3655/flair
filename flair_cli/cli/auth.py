@@ -194,12 +194,13 @@ def login(
                 # rename/extend when login moves to SSH key fingerprint or OpenSSH identity.
                 s = session_mod.Session(
                     token=CallbackHandler.token,
+                    principal=CallbackHandler.wallet,
                     wallet_address=CallbackHandler.wallet,
                     expires_at=expires_at_str
                 )
                 session_mod.save_session(s)
                 console.print("✓ [bold green]Login successful[/bold green]")
-                console.print(f"Wallet: [bold]{CallbackHandler.wallet}[/bold]")
+                console.print(f"Principal: [bold]{CallbackHandler.wallet}[/bold]")
                 console.print(f"Session expires at: [dim]{expires_at_str}[/dim]")
                 return
             
@@ -229,7 +230,8 @@ def status():
     if not s:
         console.print("Not logged in", style="yellow")
         raise typer.Exit(code=0)
-    console.print(f"Logged in as [bold]{s.wallet_address}[/bold] (expires: {s.expires_at})", style="green")
+    principal = s.principal or s.wallet_address
+    console.print(f"Logged in as [bold]{principal}[/bold] (expires: {s.expires_at})", style="green")
 
 
 @app.command("logout")

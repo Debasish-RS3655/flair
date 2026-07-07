@@ -17,14 +17,12 @@ from ..api import client as api_client
 from ..api.utils import _base_url, _client_with_auth
 from ..core import session
 from .utils.local_commits import _get_all_local_commits, _get_flair_dir, _get_head_info, _get_latest_local_commit
-# SSH-MIGRATION: replace Solana signing imports (get_solana_keypair_from_file,
-# sign_canonical_payload, verify_keypair_matches_address) with SSH signing utilities.
 from .utils.commit_signing import (
     build_canonical_payload,
     extract_jti_from_jwt,
+    get_ssh_keypair_from_file,
     sign_canonical_payload,
-    get_solana_keypair_from_file,
-    verify_keypair_matches_address,
+    verify_ssh_keypair_matches_principal,
 )
 
 from .utils.local_commits import _is_commit_complete
@@ -319,11 +317,15 @@ def push(
         console.print(f"[cyan]Pushing {len(commits_to_push)} commit(s) serially...[/cyan]\n")
 
         current_session = session.load_session()
-        if not current_session or not current_session.wallet_address:
-            console.print("[red]Authenticated wallet not found. Run 'flair auth login'.[/red]")
+        user_principal = None
+        if current_session:
+            user_principal = current_session.principal or current_session.wallet_address
+
+        if not current_session or not user_principal:
+            console.print("[red]Authenticated principal not found. Run 'flair auth login'.[/red]")
             raise typer.Exit(code=1)
 
-        wallet_address = current_session.wallet_address
+        wallet_address = user_principal
         
         # Determine initial parent commit hash
         parent_commit_hash = remote_head_hash if remote_head_hash else "_GENESIS_COMMIT_"
@@ -512,25 +514,20 @@ def push(
                 raise typer.Exit(code=1)
             signed_at = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
-            # Principal used for commit attribution (currently the authenticated wallet address).
+            # Principal used for commit attribution (authenticated wallet or SSH principal).
             user_principal = wallet_address
 
-            # SSH-MIGRATION: replace the entire Solana keypair block below with SSH signing.
-            # Expected flow: build canonical payload → invoke ssh-agent / ~/.ssh key → sign payload
-            # bytes → return signature string. Do NOT load Solana id.json or local wallet secrets.
-            console.print("[dim]Loading keypair for signature...[/dim]")
-            secret_key_bytes = get_solana_keypair_from_file()
-            if not secret_key_bytes:
-                console.print(f"[red]✗ Commit {idx}: Could not load Solana keypair[/red]")
-                console.print(f"[yellow]Ensure keypair exists at ~/.config/solana/id.json or SOLANA_KEYPAIR env var[/yellow]")
+            console.print("[dim]Loading SSH keypair for signature...[/dim]")
+            ssh_keypair = get_ssh_keypair_from_file()
+            if not ssh_keypair:
+                console.print(f"[red]✗ Commit {idx}: Could not load SSH keypair[/red]")
+                console.print(f"[yellow]Ensure an OpenSSH private key exists at ~/.ssh/id_ed25519 or set FLAIR_SSH_KEY_PATH[/yellow]")
                 console.print(f"[yellow]Stopping push after {pushed_count} successful commit(s).[/yellow]")
                 raise typer.Exit(code=1)
 
-            # SSH-MIGRATION: replace verify_keypair_matches_address with SSH public-key
-            # fingerprint check against user_principal (or renamed session.signing_identity).
-            if not verify_keypair_matches_address(secret_key_bytes, user_principal):
-                console.print(f"[red]✗ Commit {idx}: Keypair does not match user wallet[/red]")
-                console.print(f"[yellow]Keypair public key mismatch with {user_principal}[/yellow]")
+            if not verify_ssh_keypair_matches_principal(ssh_keypair, user_principal):
+                console.print(f"[red]✗ Commit {idx}: SSH keypair does not match authenticated principal[/red]")
+                console.print(f"[yellow]Loaded SSH key does not match session principal {user_principal}[/yellow]")
                 raise typer.Exit(code=1)
 
             # Build canonical payload matching server structure (keep for SSH signing).
@@ -546,9 +543,7 @@ def push(
                 metrics=commit_metrics,
             )
             
-            # SSH-MIGRATION: replace sign_canonical_payload with SSH signing of
-            # canonicalize_payload(canonical_payload); signature encoding must match backend verifySignature.
-            commit_signature = sign_canonical_payload(canonical_payload, secret_key_bytes)
+            commit_signature = sign_canonical_payload(canonical_payload, ssh_keypair)
             if not commit_signature:
                 console.print(f"[red]✗ Commit {idx}: Failed to sign commit[/red]")
                 console.print(f"[yellow]Stopping push after {pushed_count} successful commit(s).[/yellow]")

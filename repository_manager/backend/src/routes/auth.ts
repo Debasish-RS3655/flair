@@ -21,4 +21,7 @@ authRouter.post('/signin/google', authController.googleSignIn);
 // Link a wallet to the currently authenticated user using the existing wallet sign-in token.
 authRouter.post('/link/wallet', authHandler(signInContext), authController.linkWallet);
 
+// Link an SSH public key to the currently authenticated user.
+authRouter.post('/link/ssh', authHandler(signInContext), authController.linkSSH);
+
 export { authRouter };

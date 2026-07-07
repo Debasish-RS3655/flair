@@ -4,6 +4,7 @@ import { verifyGenSignInFirstTime } from "../lib/auth/general/index.js";
 import { ensureWalletIdentityForWalletPrincipal } from '../lib/auth/identity/index.js';
 import { linkWalletIdentityToUser, resolveUserIdFromPrincipal } from '../lib/auth/identity/index.js';
 import { ensureGoogleIdentityForSubject } from '../lib/auth/identity/index.js';
+import { linkSSHIdentityToUser } from '../lib/auth/identity/index.js';
 import { verifyGoogleIdToken } from '../lib/auth/google/index.js';
 import { SolanaSignInInput, SolanaSignInOutput } from "@solana/wallet-standard-features";
 import { authorizedPk } from '../middleware/auth/authHandler.js';
@@ -96,6 +97,39 @@ export const linkWallet = async (req: Request, res: Response) => {
             return;
         }
         console.error('Error linking wallet:', err);
+        res.status(400).json({ success: false, error: message });
+    }
+};
+
+export const linkSSH = async (req: Request, res: Response) => {
+    try {
+        const principal = authorizedPk(res);
+        if (!principal) {
+            res.status(401).json({ success: false, error: 'Unauthorized.' });
+            return;
+        }
+
+        const { publicKey } = req.body as { publicKey?: string };
+        if (!publicKey || typeof publicKey !== 'string' || !publicKey.trim().startsWith('ssh-ed25519 ')) {
+            res.status(400).json({ success: false, error: 'Invalid SSH public key format.' });
+            return;
+        }
+
+        const userId = await resolveUserIdFromPrincipal(principal);
+        if (!userId) {
+            res.status(404).json({ success: false, error: 'Authenticated user account not found.' });
+            return;
+        }
+
+        const sshIdentity = await linkSSHIdentityToUser(userId, publicKey.trim());
+        res.status(200).json({ success: true, data: { principal: sshIdentity.principal } });
+    } catch (err: any) {
+        const message = err?.message || 'Failed to link SSH identity.';
+        if (message.includes('already linked to another account')) {
+            res.status(409).json({ success: false, error: message });
+            return;
+        }
+        console.error('Error linking SSH key:', err);
         res.status(400).json({ success: false, error: message });
     }
 };

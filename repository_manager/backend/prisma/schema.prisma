@@ -34,6 +34,7 @@ enum CommitType {
 enum AuthProvider {
   GOOGLE
   WALLET
+  SSH
 }
 
 // user model needed to be created
@@ -300,6 +301,7 @@ model AuthIdentity {
   id        String       @id @default(auto()) @map("_id") @db.ObjectId
   provider  AuthProvider
   subject   String
+  publicKey String?
   userId    String       @db.ObjectId
   user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime     @default(now())

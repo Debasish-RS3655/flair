@@ -1,13 +1,16 @@
 import { createUser } from '../user/index.js';
 import { prisma } from '../../prisma/index.js';
+import { createHash } from 'crypto';
 
 export const GOOGLE_PRINCIPAL_PREFIX = 'google:';
+export const SSH_PRINCIPAL_PREFIX = 'ssh:';
 const WALLET_PROVIDER = 'WALLET';
 const GOOGLE_PROVIDER = 'GOOGLE';
+const SSH_PROVIDER = 'SSH';
 
 type AuthIdentityDelegate = {
-    findUnique: (args: unknown) => Promise<{ userId: string } | null>;
-    findFirst: (args: unknown) => Promise<{ subject: string } | null>;
+    findUnique: (args: unknown) => Promise<{ userId: string; publicKey?: string | null } | null>;
+    findFirst: (args: unknown) => Promise<{ subject: string; publicKey?: string | null; userId?: string } | null>;
     create: (args: unknown) => Promise<unknown>;
     upsert: (args: unknown) => Promise<unknown>;
 };
@@ -19,7 +22,38 @@ const getAuthIdentityDelegate = (): AuthIdentityDelegate | null => {
 
 export const isGooglePrincipal = (principal: string): boolean => principal.startsWith(GOOGLE_PRINCIPAL_PREFIX);
 
+export const isSSHPrincipal = (principal: string): boolean => principal.startsWith(SSH_PRINCIPAL_PREFIX);
+
 export const getGoogleSubject = (principal: string): string => principal.slice(GOOGLE_PRINCIPAL_PREFIX.length);
+
+export const getSSHSubject = (principal: string): string => principal.slice(SSH_PRINCIPAL_PREFIX.length);
+
+function decodeOpenSshPublicKey(publicKey: string): Buffer | null {
+    const trimmed = publicKey.trim();
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 2 || parts[0] !== 'ssh-ed25519') {
+        return null;
+    }
+
+    try {
+        return Buffer.from(parts[1], 'base64');
+    } catch {
+        return null;
+    }
+}
+
+export function computeSshFingerprint(publicKey: string): string | null {
+    const decoded = decodeOpenSshPublicKey(publicKey);
+    if (!decoded) return null;
+
+    const digest = createHash('sha256').update(decoded).digest('base64').replace(/=+$/u, '');
+    return `SHA256:${digest}`;
+}
+
+export function normalizeSshPrincipal(publicKey: string): string | null {
+    const fingerprint = computeSshFingerprint(publicKey);
+    return fingerprint ? `${SSH_PRINCIPAL_PREFIX}${fingerprint}` : null;
+}
 
 type GoogleIdentityProfile = {
     email?: string;
@@ -97,6 +131,55 @@ export async function ensureWalletIdentityForWalletPrincipal(walletPrincipal: st
     });
 }
 
+export async function ensureSSHIdentityForPublicKey(publicKey: string, profile?: { name?: string }): Promise<{ principal: string; userId: string }> {
+    const principal = normalizeSshPrincipal(publicKey);
+    if (!principal) {
+        throw new Error('Invalid SSH public key. Expected an ssh-ed25519 OpenSSH public key.');
+    }
+
+    const user = await prisma.user.findUnique({
+        where: { principal },
+        select: { id: true }
+    }) ?? await prisma.user.create({
+        data: {
+            principal,
+            metadata: {
+                set: {
+                    name: profile?.name,
+                }
+            }
+        },
+        select: { id: true }
+    });
+
+    const authIdentity = getAuthIdentityDelegate();
+    if (!authIdentity) {
+        return { principal, userId: user.id };
+    }
+
+    const fingerprint = getSSHSubject(principal);
+    await authIdentity.upsert({
+        where: {
+            provider_subject: {
+                provider: SSH_PROVIDER,
+                subject: fingerprint,
+            },
+        },
+        update: {
+            userId: user.id,
+            publicKey,
+        },
+        create: {
+            provider: SSH_PROVIDER,
+            subject: fingerprint,
+            publicKey,
+            userId: user.id,
+        },
+    });
+
+    return { principal, userId: user.id };
+}
+
 export async function getAttachedWalletForGooglePrincipal(principal: string): Promise<string | null> {
     const googleSubject = getGoogleSubject(principal);
     if (!googleSubject) return null;
@@ -147,6 +230,23 @@ export async function resolveUserIdFromPrincipal(principal: string): Promise<str
         return googleIdentity?.userId ?? null;
     }
 
+    if (isSSHPrincipal(principal)) {
+        if (!authIdentity) return null;
+        const sshSubject = getSSHSubject(principal);
+        if (!sshSubject) return null;
+
+        const sshIdentity = await authIdentity.findUnique({
+            where: {
+                provider_subject: {
+                    provider: SSH_PROVIDER,
+                    subject: sshSubject,
+                },
+            },
+            select: { userId: true }
+        });
+        return sshIdentity?.userId ?? null;
+    }
+
     // Wallet principal path: support both identity table and legacy user.principal.
     if (authIdentity) {
         const walletIdentity = await authIdentity.findUnique({
@@ -166,6 +266,26 @@ export async function resolveUserIdFromPrincipal(principal: string): Promise<str
         select: { id: true }
     });
     return user?.id ?? null;
+}
+
+export async function getSSHIdentityForPrincipal(principal: string): Promise<{ userId: string; publicKey: string } | null> {
+    if (!isSSHPrincipal(principal)) return null;
+
+    const authIdentity = getAuthIdentityDelegate();
+    if (!authIdentity) return null;
+
+    const sshIdentity = await authIdentity.findUnique({
+        where: {
+            provider_subject: {
+                provider: SSH_PROVIDER,
+                subject: getSSHSubject(principal),
+            },
+        },
+        select: { userId: true, publicKey: true }
+    });
+
+    if (!sshIdentity?.publicKey) return null;
+    return { userId: sshIdentity.userId, publicKey: sshIdentity.publicKey };
 }
 
 export async function linkWalletIdentityToUser(userId: string, walletPrincipal: string): Promise<void> {
@@ -197,4 +317,46 @@ export async function linkWalletIdentityToUser(userId: string, walletPrincipal: 
             userId,
         },
     });
+}
+
+export async function linkSSHIdentityToUser(userId: string, publicKey: string): Promise<{ principal: string }> {
+    const principal = normalizeSshPrincipal(publicKey);
+    if (!principal) {
+        throw new Error('Invalid SSH public key. Expected an ssh-ed25519 OpenSSH public key.');
+    }
+
+    const authIdentity = getAuthIdentityDelegate();
+    if (!authIdentity) {
+        return { principal };
+    }
+
+    const sshSubject = getSSHSubject(principal);
+    const existingSSHIdentity = await authIdentity.findUnique({
+        where: {
+            provider_subject: {
+                provider: SSH_PROVIDER,
+                subject: sshSubject,
+            },
+        },
+        select: { userId: true }
+    });
+
+    if (existingSSHIdentity && existingSSHIdentity.userId !== userId) {
+        throw new Error('This SSH key is already linked to another account.');
+    }
+
+    if (existingSSHIdentity && existingSSHIdentity.userId === userId) {
+        return { principal };
+    }
+
+    await authIdentity.create({
+        data: {
+            provider: SSH_PROVIDER,
+            subject: sshSubject,
+            publicKey,
+            userId,
+        },
+    });
+
+    return { principal };
 }
