@@ -12,7 +12,7 @@ app = typer.Typer(help="Flair — model repository ledger CLI")
 console = Console()
 
 # Mount subcommands
-app.add_typer(auth.app, name="auth", help="Authentication commands (SIWS)")
+app.add_typer(auth.app, name="auth", help="Authentication commands (SIWS login + SSH setup)")
 app.add_typer(config.app, name="config", help="Configuration management")
 app.add_typer(init.app, name="init", help="Initialize repository in current directory")
 app.add_typer(clone.app, name="clone", help="Clone a remote repository")

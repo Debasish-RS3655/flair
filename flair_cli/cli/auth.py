@@ -1,5 +1,5 @@
 """
-Auth commands (SIWS - Sign-In With Solana via browser-based OAuth2-style callback flow).
+Auth commands (SIWS login plus SSH key setup helpers).
 
 Design: The CLI starts a temporary local HTTP callback server, opens the browser with the
 auth URL + redirect_uri parameter. The frontend signs the user in, then redirects back to
@@ -11,7 +11,9 @@ default 7 days). If a valid session exists, users are not prompted to re-authent
 from __future__ import annotations
 import typer
 from rich.console import Console
+from rich.table import Table
 from rich import print as rprint
+from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import threading
@@ -23,10 +25,15 @@ from datetime import datetime, timedelta
 
 from ..core import session as session_mod
 from ..core import config as config_mod
+from ..core import ssh as ssh_mod
 from ..api.client import verify_auth
+from .utils.commit_signing import get_ssh_keypair_from_file, verify_ssh_keypair_matches_principal
 
 app = typer.Typer()
+ssh_app = typer.Typer(help="SSH key setup and environment helpers")
 console = Console()
+
+app.add_typer(ssh_app, name="ssh", help="SSH key setup and environment helpers")
 
 
 def _get_auth_url(auth_url_override: str | None = None) -> str:
@@ -63,6 +70,115 @@ def _get_auth_url(auth_url_override: str | None = None) -> str:
     
     # Should not reach here since FlairConfig has a default, but just in case
     return "http://localhost:5173/"
+
+
+def _resolve_ssh_key_path(key_path_override: str | None = None) -> Path:
+    if key_path_override:
+        return Path(key_path_override).expanduser()
+
+    env_key_path = os.environ.get("FLAIR_SSH_KEY_PATH")
+    if env_key_path:
+        return Path(env_key_path).expanduser()
+
+    metadata = ssh_mod.load_ssh_setup_metadata()
+    if metadata:
+        return Path(metadata.key_path).expanduser()
+
+    return ssh_mod.default_ssh_key_path()
+
+
+@ssh_app.command("setup")
+def ssh_setup(
+    key_path: str = typer.Option(None, "--key-path", help="SSH private key path to create or reuse"),
+    passphrase: str = typer.Option(None, "--passphrase", help="Optional passphrase to encrypt the SSH key", hide_input=True),
+    no_passphrase: bool = typer.Option(False, "--no-passphrase", help="Generate an unencrypted SSH key"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite an existing SSH key at the target path"),
+):
+    """Generate or register the SSH key used for Flair commit signing.
+
+    By default this creates a dedicated Flair key at ~/.ssh/id_ed25519_flair and
+    stores metadata in ~/.flair/ssh.json so the CLI can discover it later.
+    """
+    resolved_key_path = _resolve_ssh_key_path(key_path)
+
+    if not no_passphrase and passphrase is None:
+        passphrase = typer.prompt("Enter SSH key passphrase", hide_input=True, confirmation_prompt=True)
+
+    if no_passphrase:
+        passphrase = None
+
+    try:
+        metadata = ssh_mod.generate_ssh_keypair(resolved_key_path, passphrase=passphrase, overwrite=overwrite)
+    except FileExistsError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        console.print(f"[red]Failed to generate SSH key: {exc}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print("[green]✓ SSH key setup complete[/green]")
+    console.print(f"[dim]Private key:[/dim] {metadata.key_path}")
+    console.print(f"[dim]Public key:[/dim] {metadata.public_key_path}")
+    console.print(f"[dim]Flair principal:[/dim] {metadata.principal}")
+    console.print(f"[dim]Metadata:[/dim] {ssh_mod.SSH_SETUP_METADATA_PATH}")
+    console.print("[dim]Next:[/dim] run flair auth ssh env to generate shell activation instructions.")
+
+
+@ssh_app.command("env")
+def ssh_env(
+    shell: str = typer.Option("powershell", "--shell", help="Shell format for the activation snippet"),
+    key_path: str = typer.Option(None, "--key-path", help="SSH private key path to activate"),
+    output: str = typer.Option(None, "--output", help="Write the activation snippet to a file instead of stdout"),
+):
+    """Generate a shell snippet that sets FLAIR_SSH_KEY_PATH and passphrase env vars.
+
+    The snippet prompts for the passphrase in the target shell and exports both
+    FLAIR_SSH_KEY_PASSPHRASE and SSH_ASKPASS_PASSWORD for the current session.
+    """
+    resolved_key_path = _resolve_ssh_key_path(key_path)
+    snippet = ssh_mod.build_activation_script(shell=shell, key_path=resolved_key_path)
+
+    if output:
+        output_path = Path(output).expanduser()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(snippet + "\n", encoding="utf-8")
+        console.print(f"[green]✓ Wrote SSH activation script to {output_path}[/green]")
+        console.print("[dim]Source or dot-source that file in the same shell session to activate the env vars.[/dim]")
+        return
+
+    console.print(snippet)
+    console.print("[dim]Source or dot-source the snippet in the same shell session to activate the env vars.[/dim]")
+
+
+@ssh_app.command("status")
+def ssh_status():
+    """Show the current SSH setup, env state, and commit-signing readiness."""
+    metadata = ssh_mod.load_ssh_setup_metadata()
+    current_key_path = _resolve_ssh_key_path(None)
+    keypair = get_ssh_keypair_from_file(str(current_key_path))
+    current_session = session_mod.load_session()
+    principal = current_session.principal if current_session else None
+    env_key_path = os.environ.get("FLAIR_SSH_KEY_PATH")
+    passphrase_set = bool(os.environ.get("FLAIR_SSH_KEY_PASSPHRASE") or os.environ.get("SSH_ASKPASS_PASSWORD"))
+
+    table = Table(title="Flair SSH Status")
+    table.add_column("Item", style="cyan")
+    table.add_column("Value", style="green")
+
+    table.add_row("Metadata file", str(ssh_mod.SSH_SETUP_METADATA_PATH if ssh_mod.SSH_SETUP_METADATA_PATH.exists() else "missing"))
+    table.add_row("SSH key path", str(metadata.key_path if metadata else current_key_path))
+    table.add_row("SSH public key", str(metadata.public_key_path if metadata else Path(f"{current_key_path}.pub")))
+    table.add_row("Flair principal", metadata.principal if metadata else "not set")
+    table.add_row("Session principal", principal or "not logged in")
+    table.add_row("FLAIR_SSH_KEY_PATH", env_key_path or "unset")
+    table.add_row("FLAIR_SSH_KEY_PASSPHRASE / SSH_ASKPASS_PASSWORD", "set" if passphrase_set else "unset")
+    table.add_row("Key loadable now", "yes" if keypair else "no")
+    table.add_row(
+        "Principal matches loaded key",
+        "yes" if (metadata and keypair and verify_ssh_keypair_matches_principal(keypair, metadata.principal)) else "no",
+    )
+
+    console.print(table)
 
 
 class CallbackHandler(BaseHTTPRequestHandler):

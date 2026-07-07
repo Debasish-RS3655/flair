@@ -15,6 +15,8 @@ from typing import Any, Dict, Optional
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from ...core.ssh import load_ssh_setup_metadata
+
 
 @dataclass(frozen=True)
 class SSHKeypair:
@@ -159,6 +161,10 @@ def get_ssh_keypair_from_file(key_path: Optional[str] = None) -> Optional[SSHKey
     env_path = os.getenv("FLAIR_SSH_KEY_PATH")
     if env_path:
         search_paths.append(Path(env_path).expanduser())
+
+    setup_metadata = load_ssh_setup_metadata()
+    if setup_metadata and setup_metadata.key_path:
+        search_paths.append(Path(setup_metadata.key_path).expanduser())
 
     search_paths.extend(_default_ssh_private_key_paths())
 
