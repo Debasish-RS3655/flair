@@ -5,7 +5,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma/index.js';
 import { authorizedPrincipal } from '../middleware/auth/authHandler.js';
 import { UserMetadata } from '../lib/types/user.js';
-import { resolveUserIdFromPrincipal } from '../lib/auth/identity/index.js';
+import { listSSHIdentitiesForUser, resolveUserIdFromPrincipal, upsertSSHIdentityForUser } from '../lib/auth/identity/index.js';
 
 // Get user by username
 export async function getUserByUsername(req: Request, res: Response) {
@@ -172,5 +172,50 @@ export async function deleteUser(req: Request, res: Response) {
     } catch (err) {
         console.error(`Error deleting user: ${err}`);
         res.status(500);
+    }
+}
+
+export async function getUserSSHKeys(req: Request, res: Response) {
+    try {
+        const principal = authorizedPrincipal(res);
+        const userId = await resolveUserIdFromPrincipal(principal);
+        if (!userId) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+
+        const keys = await listSSHIdentitiesForUser(userId);
+        res.status(200).json({ data: keys });
+    } catch (err) {
+        console.error(`Error getting SSH keys: ${err}`);
+        res.status(500).send({ error: { message: 'Could not load SSH keys.' } });
+    }
+}
+
+export async function registerUserSSHKey(req: Request, res: Response) {
+    try {
+        const principal = authorizedPrincipal(res);
+        const userId = await resolveUserIdFromPrincipal(principal);
+        if (!userId) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+
+        const { publicKey } = req.body as { publicKey?: string };
+        if (!publicKey || typeof publicKey !== 'string') {
+            res.status(400).json({ error: { message: 'publicKey is required.' } });
+            return;
+        }
+
+        const key = await upsertSSHIdentityForUser(userId, publicKey);
+        res.status(200).json({ data: key });
+    } catch (err: any) {
+        const message = err?.message || 'Could not register SSH key.';
+        if (message.includes('already linked to another account')) {
+            res.status(409).json({ error: { message } });
+            return;
+        }
+        console.error(`Error registering SSH key: ${err}`);
+        res.status(400).json({ error: { message } });
     }
 }

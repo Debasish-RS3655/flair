@@ -15,7 +15,7 @@ import bs58 from 'bs58';
 import { ZKMLProofCreateObj } from '../lib/types/zkmlproof.js';
 import { convertCommitToNft } from '../lib/nft/nft.js';
 import { umi } from '../lib/nft/umi.js';
-import { getSSHIdentityForPrincipal, isSSHPrincipal, resolveUserIdFromPrincipal } from '../lib/auth/identity/index.js';
+import { getSSHIdentityForUserAndFingerprint, resolveUserIdFromPrincipal } from '../lib/auth/identity/index.js';
 
 const ZKP_JWT_SECRET = process.env.ZKP_JWT_SECRET || 'super-secret-commit-generation';
 const COMMIT_JWT_SECRET = process.env.COMMIT_JWT_SECRET || 'another-super-secret-commit-generation';
@@ -149,12 +149,18 @@ function openSshEd25519ToPem(publicKey: string): string | null {
 
 // SSH-MIGRATION: resolve commit-signing identity from SSH auth provider, not WALLET/Solana only.
 // Google-linked SSH keys and provider selection logic will need updating here.
-async function getUserPublicKeyInfo(pk: string): Promise<IdentityPublicKeyInfo | null> {
+async function getUserPublicKeyInfo(pk: string, sshKeyFingerprint?: string): Promise<IdentityPublicKeyInfo | null> {
     try {
-        if (isSSHPrincipal(pk)) {
-            const sshIdentity = await getSSHIdentityForPrincipal(pk);
+        if (sshKeyFingerprint) {
+            const userId = await resolveUserIdFromPrincipal(pk);
+            if (!userId) {
+                console.warn(`User with principal ${pk} not found`);
+                return null;
+            }
+
+            const sshIdentity = await getSSHIdentityForUserAndFingerprint(userId, sshKeyFingerprint);
             if (!sshIdentity) {
-                console.warn(`No SSH identity found for principal ${pk}`);
+                console.warn(`No SSH identity found for user ${userId} and fingerprint ${sshKeyFingerprint}`);
                 return null;
             }
 
@@ -928,7 +934,8 @@ export const finalizeCommit = async (req: Request, res: Response) => {
             initiateToken,
             zkmlReceiptToken,
             paramsReceiptToken,
-            commitSignature,     // SSH-MIGRATION: signature of canonical commit payload (Solana ED25519 today; SSH next)
+            commitSignature,
+            sshKeyFingerprint,
             signedAt
         } = req.body;
 
@@ -1104,11 +1111,16 @@ export const finalizeCommit = async (req: Request, res: Response) => {
             return;
         }
 
-        const publicKeyInfo = await getUserPublicKeyInfo(pk);
+        if (!sshKeyFingerprint || typeof sshKeyFingerprint !== 'string') {
+            res.status(400).json({ error: { message: 'sshKeyFingerprint is required for SSH-signed commits.' } });
+            return;
+        }
+
+        const publicKeyInfo = await getUserPublicKeyInfo(pk, sshKeyFingerprint);
         if (!publicKeyInfo) {
             res.status(401).json({ 
                 error: { 
-                    message: 'User cannot sign commits. Only WALLET or SSH-authenticated users can create signed commits.' 
+                    message: 'User cannot sign commits. Register a valid SSH key first.' 
                 } 
             });
             return;

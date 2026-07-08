@@ -27,7 +27,8 @@ from ..core import session as session_mod
 from ..core import config as config_mod
 from ..core import ssh as ssh_mod
 from ..api.client import verify_auth
-from .utils.commit_signing import get_ssh_keypair_from_file, verify_ssh_keypair_matches_principal
+from ..api.utils import _client_with_auth
+from .utils.commit_signing import load_ssh_agent_identities
 
 app = typer.Typer()
 ssh_app = typer.Typer(help="SSH key setup and environment helpers")
@@ -76,14 +77,6 @@ def _resolve_ssh_key_path(key_path_override: str | None = None) -> Path:
     if key_path_override:
         return Path(key_path_override).expanduser()
 
-    env_key_path = os.environ.get("FLAIR_SSH_KEY_PATH")
-    if env_key_path:
-        return Path(env_key_path).expanduser()
-
-    metadata = ssh_mod.load_ssh_setup_metadata()
-    if metadata:
-        return Path(metadata.key_path).expanduser()
-
     return ssh_mod.default_ssh_key_path()
 
 
@@ -97,7 +90,7 @@ def ssh_setup(
     """Generate or register the SSH key used for Flair commit signing.
 
     By default this creates a dedicated Flair key at ~/.ssh/id_ed25519_flair and
-    stores metadata in ~/.flair/ssh.json so the CLI can discover it later.
+    registers the public key with the Flair backend.
     """
     resolved_key_path = _resolve_ssh_key_path(key_path)
 
@@ -116,12 +109,26 @@ def ssh_setup(
         console.print(f"[red]Failed to generate SSH key: {exc}[/red]")
         raise typer.Exit(code=1)
 
+    try:
+        with _client_with_auth() as client:
+            response = client.post(
+                "/api/user/keys",
+                json={"publicKey": metadata.public_key},
+            )
+            response.raise_for_status()
+            registered_key = response.json().get("data", {})
+    except Exception as exc:
+        console.print(f"[yellow]SSH key generated, but backend registration failed: {exc}[/yellow]")
+        console.print("[yellow]Run flair auth login first, then rerun flair auth ssh setup.[/yellow]")
+        raise typer.Exit(code=1)
+
     console.print("[green]✓ SSH key setup complete[/green]")
     console.print(f"[dim]Private key:[/dim] {metadata.key_path}")
     console.print(f"[dim]Public key:[/dim] {metadata.public_key_path}")
     console.print(f"[dim]Flair principal:[/dim] {metadata.principal}")
-    console.print(f"[dim]Metadata:[/dim] {ssh_mod.SSH_SETUP_METADATA_PATH}")
-    console.print("[dim]Next:[/dim] run flair auth ssh env to generate shell activation instructions.")
+    if registered_key.get("fingerprint"):
+        console.print(f"[dim]Backend fingerprint:[/dim] {registered_key.get('fingerprint')}")
+    console.print("[dim]Next:[/dim] run flair auth ssh env to get ssh-agent activation instructions.")
 
 
 @ssh_app.command("env")
@@ -130,10 +137,10 @@ def ssh_env(
     key_path: str = typer.Option(None, "--key-path", help="SSH private key path to activate"),
     output: str = typer.Option(None, "--output", help="Write the activation snippet to a file instead of stdout"),
 ):
-    """Generate a shell snippet that sets FLAIR_SSH_KEY_PATH and passphrase env vars.
+    """Generate a shell snippet that starts ssh-agent and loads the Flair SSH key.
 
-    The snippet prompts for the passphrase in the target shell and exports both
-    FLAIR_SSH_KEY_PASSPHRASE and SSH_ASKPASS_PASSWORD for the current session.
+    The snippet uses standard ssh-agent / ssh-add commands and does not rely on
+    Flair-specific environment variables.
     """
     resolved_key_path = _resolve_ssh_key_path(key_path)
     snippet = ssh_mod.build_activation_script(shell=shell, key_path=resolved_key_path)
@@ -143,40 +150,41 @@ def ssh_env(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(snippet + "\n", encoding="utf-8")
         console.print(f"[green]✓ Wrote SSH activation script to {output_path}[/green]")
-        console.print("[dim]Source or dot-source that file in the same shell session to activate the env vars.[/dim]")
+        console.print("[dim]Source or dot-source that file in the same shell session to start ssh-agent and load the key.[/dim]")
         return
 
     console.print(snippet)
-    console.print("[dim]Source or dot-source the snippet in the same shell session to activate the env vars.[/dim]")
+    console.print("[dim]Source or dot-source the snippet in the same shell session to start ssh-agent and load the key.[/dim]")
 
 
 @ssh_app.command("status")
 def ssh_status():
-    """Show the current SSH setup, env state, and commit-signing readiness."""
-    metadata = ssh_mod.load_ssh_setup_metadata()
+    """Show the current SSH setup and commit-signing readiness."""
     current_key_path = _resolve_ssh_key_path(None)
-    keypair = get_ssh_keypair_from_file(str(current_key_path))
+    agent_identities = load_ssh_agent_identities()
     current_session = session_mod.load_session()
     principal = current_session.principal if current_session else None
-    env_key_path = os.environ.get("FLAIR_SSH_KEY_PATH")
-    passphrase_set = bool(os.environ.get("FLAIR_SSH_KEY_PASSPHRASE") or os.environ.get("SSH_ASKPASS_PASSWORD"))
+    public_key_path = Path(f"{current_key_path}.pub")
+
+    backend_key_count = 0
+    try:
+        with _client_with_auth() as client:
+            response = client.get("/api/user/keys")
+            response.raise_for_status()
+            backend_key_count = len(response.json().get("data", []))
+    except Exception:
+        backend_key_count = 0
 
     table = Table(title="Flair SSH Status")
     table.add_column("Item", style="cyan")
     table.add_column("Value", style="green")
 
-    table.add_row("Metadata file", str(ssh_mod.SSH_SETUP_METADATA_PATH if ssh_mod.SSH_SETUP_METADATA_PATH.exists() else "missing"))
-    table.add_row("SSH key path", str(metadata.key_path if metadata else current_key_path))
-    table.add_row("SSH public key", str(metadata.public_key_path if metadata else Path(f"{current_key_path}.pub")))
-    table.add_row("Flair principal", metadata.principal if metadata else "not set")
+    table.add_row("SSH key path", str(current_key_path))
+    table.add_row("SSH public key", str(public_key_path))
+    table.add_row("SSH agent loaded keys", str(len(agent_identities)))
+    table.add_row("Registered Flair SSH keys", str(backend_key_count))
     table.add_row("Session principal", principal or "not logged in")
-    table.add_row("FLAIR_SSH_KEY_PATH", env_key_path or "unset")
-    table.add_row("FLAIR_SSH_KEY_PASSPHRASE / SSH_ASKPASS_PASSWORD", "set" if passphrase_set else "unset")
-    table.add_row("Key loadable now", "yes" if keypair else "no")
-    table.add_row(
-        "Principal matches loaded key",
-        "yes" if (metadata and keypair and verify_ssh_keypair_matches_principal(keypair, metadata.principal)) else "no",
-    )
+    table.add_row("Default key exists", "yes" if current_key_path.exists() else "no")
 
     console.print(table)
 

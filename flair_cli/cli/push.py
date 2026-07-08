@@ -20,9 +20,9 @@ from .utils.local_commits import _get_all_local_commits, _get_flair_dir, _get_he
 from .utils.commit_signing import (
     build_canonical_payload,
     extract_jti_from_jwt,
-    get_ssh_keypair_from_file,
+    find_agent_identity_by_fingerprint,
+    load_ssh_agent_identities,
     sign_canonical_payload,
-    verify_ssh_keypair_matches_principal,
 )
 
 from .utils.local_commits import _is_commit_complete
@@ -326,6 +326,33 @@ def push(
             raise typer.Exit(code=1)
 
         wallet_address = user_principal
+
+        with _client_with_auth() as client:
+            response = client.get(f"{_base_url()}/api/user/keys")
+            response.raise_for_status()
+            registered_keys = response.json().get("data", [])
+
+        registered_fingerprints = {
+            key.get("fingerprint")
+            for key in registered_keys
+            if isinstance(key, dict) and key.get("fingerprint")
+        }
+
+        agent_identities = load_ssh_agent_identities()
+        if not agent_identities:
+            console.print("[red]No SSH keys are loaded in ssh-agent. Load the key with ssh-add and try again.[/red]")
+            raise typer.Exit(code=1)
+
+        ssh_identity = None
+        for fingerprint in registered_fingerprints:
+            ssh_identity = find_agent_identity_by_fingerprint(fingerprint, agent_identities)
+            if ssh_identity:
+                break
+
+        if not ssh_identity:
+            console.print("[red]No ssh-agent key matches a registered Flair SSH public key.[/red]")
+            console.print("[yellow]Run flair auth ssh setup to register the public key, then ssh-add the key.[/yellow]")
+            raise typer.Exit(code=1)
         
         # Determine initial parent commit hash
         parent_commit_hash = remote_head_hash if remote_head_hash else "_GENESIS_COMMIT_"
@@ -517,19 +544,6 @@ def push(
             # Principal used for commit attribution (authenticated wallet or SSH principal).
             user_principal = wallet_address
 
-            console.print("[dim]Loading SSH keypair for signature...[/dim]")
-            ssh_keypair = get_ssh_keypair_from_file()
-            if not ssh_keypair:
-                console.print(f"[red]✗ Commit {idx}: Could not load SSH keypair[/red]")
-                console.print(f"[yellow]Ensure an OpenSSH private key exists at ~/.ssh/id_ed25519 or set FLAIR_SSH_KEY_PATH[/yellow]")
-                console.print(f"[yellow]Stopping push after {pushed_count} successful commit(s).[/yellow]")
-                raise typer.Exit(code=1)
-
-            if not verify_ssh_keypair_matches_principal(ssh_keypair, user_principal):
-                console.print(f"[red]✗ Commit {idx}: SSH keypair does not match authenticated principal[/red]")
-                console.print(f"[yellow]Loaded SSH key does not match session principal {user_principal}[/yellow]")
-                raise typer.Exit(code=1)
-
             # Build canonical payload matching server structure (keep for SSH signing).
             canonical_payload = build_canonical_payload(
                 session_jti=session_jti,
@@ -543,7 +557,7 @@ def push(
                 metrics=commit_metrics,
             )
             
-            commit_signature = sign_canonical_payload(canonical_payload, ssh_keypair)
+            commit_signature = sign_canonical_payload(canonical_payload, ssh_identity)
             if not commit_signature:
                 console.print(f"[red]✗ Commit {idx}: Failed to sign commit[/red]")
                 console.print(f"[yellow]Stopping push after {pushed_count} successful commit(s).[/yellow]")
@@ -564,6 +578,7 @@ def push(
                         "architecture": framework,
                         "metrics": commit_metrics,
                         "commitSignature": commit_signature,
+                        "sshKeyFingerprint": ssh_identity.fingerprint,
                         "commitType": commit_type,
                     }
                 )

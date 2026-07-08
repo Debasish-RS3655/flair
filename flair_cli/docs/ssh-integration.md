@@ -1,44 +1,41 @@
 # SSH Integration
 
-Flair CLI now supports SSH keys as the commit signing mechanism alongside the existing Solana wallet flow.
+Flair CLI now uses standard SSH tooling for commit signing:
 
-## What the CLI uses
+- private keys live in `~/.ssh`
+- `ssh-agent` keeps unlocked keys in memory
+- the backend stores the registered public key for the authenticated Flair account
+- commit verification uses the SSH fingerprint plus the stored public key
 
-- `flair auth ssh setup` creates or registers a dedicated SSH key for Flair commit signing.
-- `flair auth ssh env` generates a shell activation snippet for the current session.
-- `flair auth ssh status` verifies the key, metadata, env vars, and session principal.
+## Commands
 
-The signing path uses these values:
+```bash
+flair auth ssh setup
+flair auth ssh env
+flair auth ssh status
+```
 
-- `FLAIR_SSH_KEY_PATH` for the private key location
-- `FLAIR_SSH_KEY_PASSPHRASE` for the key passphrase
-- `SSH_ASKPASS_PASSWORD` as a fallback passphrase source for non-interactive signing
+### `flair auth ssh setup`
 
-## Recommended key location
-
-The default setup command uses a dedicated Flair key instead of reusing a personal SSH identity:
+Creates a dedicated Flair signing key by default at:
 
 ```text
 ~/.ssh/id_ed25519_flair
 ```
 
-The setup command also stores metadata in:
+Then it registers the public key with the Flair backend for the currently logged-in account.
+
+If the key does not already exist, Flair generates it and writes the companion public key file:
 
 ```text
-~/.flair/ssh.json
+~/.ssh/id_ed25519_flair.pub
 ```
 
-That metadata lets Flair discover the configured SSH key automatically even if `FLAIR_SSH_KEY_PATH` is not set yet.
+### `flair auth ssh env`
 
-## Typical setup flow
+Prints a shell snippet for the current shell that starts `ssh-agent` and loads the Flair signing key with `ssh-add`.
 
-```bash
-flair auth ssh setup
-```
-
-If you want an encrypted SSH key, allow the setup command to prompt for a passphrase. If you want a key without a passphrase, use `--no-passphrase`.
-
-Then generate the shell activation snippet for the shell you actually use:
+Typical usage:
 
 ```bash
 flair auth ssh env --shell powershell --output ~/.flair/activate-ssh.ps1
@@ -50,20 +47,31 @@ For bash-like shells:
 flair auth ssh env --shell bash --output ~/.flair/activate-ssh.sh
 ```
 
-The activation script is designed to be sourced in the current shell session so the environment variables are available to the CLI process.
+The generated snippet does not set Flair-specific environment variables. It only prepares the standard SSH agent workflow.
 
-## Commit signing flow
+### `flair auth ssh status`
+
+Shows:
+
+- the default SSH key path
+- whether the key exists
+- how many keys are currently loaded in `ssh-agent`
+- how many SSH keys are registered for the logged-in Flair account
+
+## Commit Signing Flow
 
 When you run `flair push`, the CLI:
 
-1. Loads the current session principal.
-2. Resolves the SSH key path from `FLAIR_SSH_KEY_PATH`, saved Flair metadata, or the default key path.
-3. Loads the SSH private key and prompts via the shell script env vars when a passphrase is required.
-4. Signs the canonical commit payload.
-5. Sends the signature to the backend, which verifies it against the stored SSH public key for the matching `ssh:SHA256:<fingerprint>` principal.
+1. Loads the current Flair session principal.
+2. Queries the backend for SSH keys registered to that account.
+3. Reads the identities currently loaded in `ssh-agent`.
+4. Picks an agent key whose fingerprint matches a registered Flair SSH key.
+5. Signs the canonical commit payload through the agent.
+6. Sends the signature and SSH fingerprint to the backend.
+7. The backend looks up the registered public key for that fingerprint and verifies the commit signature.
 
 ## Notes
 
-- The CLI does not store your SSH passphrase in the repo or in `~/.flair/ssh.json`.
-- The `env` command is the supported way to prepare `FLAIR_SSH_KEY_PASSPHRASE` and `SSH_ASKPASS_PASSWORD` for a shell session.
-- If you rotate your SSH key, rerun `flair auth ssh setup` and then re-generate the env snippet.
+- Flair no longer relies on `FLAIR_SSH_KEY_PASSPHRASE` or `SSH_ASKPASS_PASSWORD` for SSH commit signing.
+- Flair does not store SSH passphrases or a local SSH metadata file.
+- If you rotate a key, rerun `flair auth ssh setup` to register the new public key, then load it into `ssh-agent` with `ssh-add`.

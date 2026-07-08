@@ -11,6 +11,7 @@ const SSH_PROVIDER = 'SSH';
 type AuthIdentityDelegate = {
     findUnique: (args: unknown) => Promise<{ userId: string; publicKey?: string | null } | null>;
     findFirst: (args: unknown) => Promise<{ subject: string; publicKey?: string | null; userId?: string } | null>;
+    findMany: (args: unknown) => Promise<Array<{ id: string; subject: string; publicKey?: string | null; createdAt?: Date; userId?: string }>>;
     create: (args: unknown) => Promise<unknown>;
     upsert: (args: unknown) => Promise<unknown>;
 };
@@ -48,6 +49,11 @@ export function computeSshFingerprint(publicKey: string): string | null {
 
     const digest = createHash('sha256').update(decoded).digest('base64').replace(/=+$/u, '');
     return `SHA256:${digest}`;
+}
+
+export function normalizeSshPublicKey(publicKey: string): string | null {
+    const trimmed = publicKey.trim();
+    return trimmed.startsWith('ssh-ed25519 ') ? trimmed : null;
 }
 
 export function normalizeSshPrincipal(publicKey: string): string | null {
@@ -132,7 +138,8 @@ export async function ensureWalletIdentityForWalletPrincipal(walletPrincipal: st
 }
 
 export async function ensureSSHIdentityForPublicKey(publicKey: string, profile?: { name?: string }): Promise<{ principal: string; userId: string }> {
-    const principal = normalizeSshPrincipal(publicKey);
+    const normalizedPublicKey = normalizeSshPublicKey(publicKey);
+    const principal = normalizedPublicKey ? normalizeSshPrincipal(normalizedPublicKey) : null;
     if (!principal) {
         throw new Error('Invalid SSH public key. Expected an ssh-ed25519 OpenSSH public key.');
     }
@@ -172,7 +179,7 @@ export async function ensureSSHIdentityForPublicKey(publicKey: string, profile?:
         create: {
             provider: SSH_PROVIDER,
             subject: fingerprint,
-            publicKey,
+            publicKey: normalizedPublicKey,
             userId: user.id,
         },
     });
@@ -288,6 +295,105 @@ export async function getSSHIdentityForPrincipal(principal: string): Promise<{ u
     return { userId: sshIdentity.userId, publicKey: sshIdentity.publicKey };
 }
 
+export async function getSSHIdentityForUserAndFingerprint(userId: string, fingerprint: string): Promise<{ id: string; publicKey: string; subject: string } | null> {
+    const authIdentity = getAuthIdentityDelegate();
+    if (!authIdentity) return null;
+
+    const sshIdentity = await authIdentity.findUnique({
+        where: {
+            provider_subject: {
+                provider: SSH_PROVIDER,
+                subject: fingerprint,
+            },
+        },
+        select: { id: true, userId: true, publicKey: true, subject: true }
+    });
+
+    if (!sshIdentity || sshIdentity.userId !== userId || !sshIdentity.publicKey) return null;
+    return { id: sshIdentity.id, publicKey: sshIdentity.publicKey, subject: sshIdentity.subject };
+}
+
+export async function listSSHIdentitiesForUser(userId: string): Promise<Array<{ id: string; fingerprint: string; publicKey: string; createdAt?: Date }>> {
+    const authIdentity = getAuthIdentityDelegate();
+    if (!authIdentity) return [];
+
+    const identities = await authIdentity.findMany({
+        where: { userId, provider: SSH_PROVIDER },
+        select: { id: true, subject: true, publicKey: true, createdAt: true },
+        orderBy: { createdAt: 'asc' }
+    });
+
+    return identities
+        .filter((identity) => Boolean(identity.publicKey))
+        .map((identity) => ({
+            id: identity.id,
+            fingerprint: identity.subject,
+            publicKey: identity.publicKey as string,
+            createdAt: identity.createdAt,
+        }));
+}
+
+export async function upsertSSHIdentityForUser(userId: string, publicKey: string): Promise<{ id: string; fingerprint: string; publicKey: string }> {
+    const normalizedPublicKey = normalizeSshPublicKey(publicKey);
+    if (!normalizedPublicKey) {
+        throw new Error('Invalid SSH public key. Expected an ssh-ed25519 OpenSSH public key.');
+    }
+
+    const fingerprint = computeSshFingerprint(normalizedPublicKey);
+    if (!fingerprint) {
+        throw new Error('Could not compute SSH key fingerprint.');
+    }
+
+    const authIdentity = getAuthIdentityDelegate();
+    if (!authIdentity) {
+        throw new Error('SSH identity storage is not available.');
+    }
+
+    const existingSSHIdentity = await authIdentity.findUnique({
+        where: {
+            provider_subject: {
+                provider: SSH_PROVIDER,
+                subject: fingerprint,
+            },
+        },
+        select: { id: true, userId: true, publicKey: true, subject: true }
+    });
+
+    if (existingSSHIdentity && existingSSHIdentity.userId !== userId) {
+        throw new Error('This SSH key is already linked to another account.');
+    }
+
+    const savedIdentity = existingSSHIdentity
+        ? await authIdentity.upsert({
+            where: {
+                provider_subject: {
+                    provider: SSH_PROVIDER,
+                    subject: fingerprint,
+                },
+            },
+            update: {
+                userId,
+                publicKey: normalizedPublicKey,
+            },
+            create: {
+                provider: SSH_PROVIDER,
+                subject: fingerprint,
+                publicKey: normalizedPublicKey,
+                userId,
+            },
+        }) as { id: string; subject: string; publicKey: string }
+        : await authIdentity.create({
+            data: {
+                provider: SSH_PROVIDER,
+                subject: fingerprint,
+                publicKey: normalizedPublicKey,
+                userId,
+            },
+        }) as { id: string; subject: string; publicKey: string };
+
+    return { id: savedIdentity.id, fingerprint, publicKey: normalizedPublicKey };
+}
+
 export async function linkWalletIdentityToUser(userId: string, walletPrincipal: string): Promise<void> {
     const authIdentity = getAuthIdentityDelegate();
     if (!authIdentity) return;
@@ -320,7 +426,8 @@ export async function linkWalletIdentityToUser(userId: string, walletPrincipal: 
 }
 
 export async function linkSSHIdentityToUser(userId: string, publicKey: string): Promise<{ principal: string }> {
-    const principal = normalizeSshPrincipal(publicKey);
+    const normalizedPublicKey = normalizeSshPublicKey(publicKey);
+    const principal = normalizedPublicKey ? normalizeSshPrincipal(normalizedPublicKey) : null;
     if (!principal) {
         throw new Error('Invalid SSH public key. Expected an ssh-ed25519 OpenSSH public key.');
     }

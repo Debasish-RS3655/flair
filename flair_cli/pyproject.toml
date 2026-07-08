@@ -30,6 +30,7 @@ tensorflow = "^2.15"
 torch = "^2.2"
 ezkl = ">=0.4.0"
 cryptography = "^43.0"
+paramiko = "^3.5"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
