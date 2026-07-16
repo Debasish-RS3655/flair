@@ -25,6 +25,8 @@ Creates a dedicated Flair signing key by default at:
 
 Then it registers the public key with the Flair backend for the currently logged-in account.
 
+Prerequisite: run `flair auth login` first so the backend can associate the key with your account.
+
 If the key does not already exist, Flair generates it and writes the companion public key file:
 
 ```text
@@ -49,6 +51,8 @@ flair auth ssh env --shell bash --output ~/.flair/activate-ssh.sh
 
 The generated snippet does not set Flair-specific environment variables. It only prepares the standard SSH agent workflow.
 
+If the key is already loaded in your current `ssh-agent` session, you do not need to run this command again.
+
 ### `flair auth ssh status`
 
 Shows:
@@ -69,6 +73,14 @@ When you run `flair push`, the CLI:
 5. Signs the canonical commit payload through the agent.
 6. Sends the signature and SSH fingerprint to the backend.
 7. The backend looks up the registered public key for that fingerprint and verifies the commit signature.
+
+## Setup Recipe
+
+1. Sign in with `flair auth login`.
+2. Run `flair auth ssh setup` to generate or register the SSH key.
+3. Load the key into `ssh-agent` with `ssh-add` or use `flair auth ssh env` to generate a helper snippet.
+4. Confirm the key is visible with `flair auth ssh status`.
+5. Run `flair push` to sign commits with the registered SSH identity.
 
 ## Notes
 
