@@ -23,5 +23,9 @@ export const genAuth = (ctx) => (req, res, next) => {
         return;
     }
 };
-// extract the authoorized public key that is stored in the locals property
-export const authorizedPk = (res) => res.locals.pubKey;
+// extract the authenticated principal from request context.
+// for wallet-auth users, this is a wallet address.
+// for google-auth users, this is expected to be `google:<sub>`.
+export const authorizedPrincipal = (res) => res.locals.pubKey;
+// backwards-compatible alias used by legacy controllers.
+export const authorizedPk = authorizedPrincipal;

@@ -5,6 +5,7 @@ import { authorizedPk } from '../middleware/auth/authHandler.js';
 import { convertRepoToCollection } from '../lib/nft/nft.js';
 import { umi } from '../lib/nft/umi.js';
 import { v4 as uuidv4 } from 'uuid';
+import { resolveUserIdFromPrincipal } from '../lib/auth/identity/index.js';
 // Get all the repositories for the particular user
 export async function getAllRepositories(req, res) {
     // Extract the authorized public key
@@ -82,10 +83,8 @@ export async function createRepository(req, res) {
             res.status(400).send({ error: { message: 'You already have a repository with this name.' } });
             return;
         }
-        const owner = await prisma.user.findFirst({
-            where: { wallet: pk }
-        });
-        if (!owner) {
+        const ownerId = await resolveUserIdFromPrincipal(pk);
+        if (!ownerId) {
             res.status(401).send({ error: { message: 'User not found!' } });
             return;
         }
@@ -106,7 +105,7 @@ export async function createRepository(req, res) {
                     }
                 },
                 repoHash: uuidv4(),
-                ownerId: owner.id
+                ownerId
             }
         });
         res.status(201).json({ data: repository });
@@ -184,6 +183,21 @@ export async function updateRepository(req, res) {
 export async function createCollection(req, res) {
     const { repoHash } = req.params;
     try {
+        const pk = authorizedPk(res);
+        const matchedRepo = await prisma.repository.findUnique({ where: { repoHash } });
+        if (!matchedRepo) {
+            res.status(404).send({ error: { message: 'Repository not found.' } });
+            return;
+        }
+        const isAuthorized = matchedRepo.ownerAddress === pk || matchedRepo.adminIds.includes(pk);
+        if (!isAuthorized) {
+            res.status(403).send({ error: { message: 'Unauthorized. Only owner or admins can create NFT collections.' } });
+            return;
+        }
+        if (matchedRepo.collectionId) {
+            res.status(409).send({ error: { message: 'Repository already converted to an NFT collection.' } });
+            return;
+        }
         const collection = await convertRepoToCollection(umi, repoHash);
         res.status(200).json({ data: collection });
     }
@@ -457,6 +471,120 @@ export async function getRepositoryRoles(req, res) {
     }
     catch (error) {
         console.error('Error fetching repository roles:', error);
+        res.status(500).json({ error: { message: 'Internal Server Error' } });
+    }
+}
+// Clone repository: fetch repo + branches + latest commit + params for cloning
+export async function cloneRepository(req, res) {
+    try {
+        const { repoHash } = req.params;
+        // Get repository details
+        const repo = await prisma.repository.findUnique({
+            where: { repoHash },
+            select: {
+                id: true,
+                name: true,
+                repoHash: true,
+                ownerAddress: true,
+                metadata: true,
+                createdAt: true,
+                updatedAt: true,
+                baseModelHash: true,
+                defaultBranchHash: true
+            }
+        });
+        if (!repo) {
+            res.status(404).json({ error: { message: 'Repository not found.' } });
+            return;
+        }
+        // Get all branches for this repository
+        const branches = await prisma.branch.findMany({
+            where: { repositoryId: repo.id },
+            select: {
+                id: true,
+                name: true,
+                branchHash: true,
+                description: true,
+                createdAt: true,
+                updatedAt: true
+            }
+        });
+        // Get latest commit for each branch
+        const branchesWithLatest = await Promise.all(branches.map(async (branch) => {
+            const latestCommit = await prisma.commit.findFirst({
+                where: {
+                    branchId: branch.id,
+                    isDeleted: false
+                },
+                orderBy: { createdAt: 'desc' },
+                select: {
+                    id: true,
+                    commitHash: true,
+                    message: true,
+                    paramHash: true,
+                    status: true,
+                    createdAt: true,
+                    committerAddress: true,
+                    params: {
+                        select: {
+                            ipfsObject: {
+                                select: {
+                                    cid: true,
+                                    uri: true,
+                                    extension: true,
+                                    size: true
+                                }
+                            },
+                            ZKMLProof: {
+                                select: {
+                                    proof: { select: { cid: true, uri: true, extension: true } },
+                                    settings: { select: { cid: true, uri: true, extension: true } },
+                                    verification_key: { select: { cid: true, uri: true, extension: true } },
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            return {
+                ...branch,
+                latestCommit: latestCommit || null,
+                isDefault: repo.defaultBranchHash ? branch.branchHash === repo.defaultBranchHash : false
+            };
+        }));
+        // Get base model info if exists
+        let baseModel = null;
+        if (repo.baseModelHash) {
+            baseModel = await prisma.ipfsObject.findFirst({
+                where: { cid: repo.baseModelHash },
+                select: {
+                    cid: true,
+                    uri: true,
+                    extension: true,
+                    size: true,
+                    createdAt: true
+                }
+            });
+        }
+        // Prepare clone data
+        const cloneData = {
+            repo: {
+                name: repo.name,
+                hash: repo.repoHash,
+                owner: repo.ownerAddress,
+                metadata: repo.metadata,
+                baseModel: baseModel,
+                defaultBranchHash: repo.defaultBranchHash,
+                createdAt: repo.createdAt,
+                updatedAt: repo.updatedAt
+            },
+            branches: branchesWithLatest,
+            branchCount: branches.length
+        };
+        res.status(200).json({ data: cloneData });
+    }
+    catch (error) {
+        console.error('Error cloning repository:', error);
         res.status(500).json({ error: { message: 'Internal Server Error' } });
     }
 }

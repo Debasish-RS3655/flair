@@ -1,3 +1,7 @@
+// inherent functions for verifiying zk proofs offchain on the repository manager
+// currently not being used anywhere
+// separate zkp verification server that runs the verification dedicatedly
+// Debasish Buragohain
 import * as wasmFunctions from '@ezkljs/engine/nodejs';
 import { 
 // readDataFile, 

@@ -1,5 +1,14 @@
 import { createSignInData, verifySIWSsignin } from '../lib/auth/siws/index.js';
 import { verifyGenSignInFirstTime } from "../lib/auth/general/index.js";
+import { ensureWalletIdentityForWalletPrincipal } from '../lib/auth/identity/index.js';
+import { linkWalletIdentityToUser, resolveUserIdFromPrincipal } from '../lib/auth/identity/index.js';
+import { ensureGoogleIdentityForSubject } from '../lib/auth/identity/index.js';
+import { linkSSHIdentityToUser } from '../lib/auth/identity/index.js';
+import { verifyGoogleIdToken } from '../lib/auth/google/index.js';
+import { authorizedPk } from '../middleware/auth/authHandler.js';
+import jwt from 'jsonwebtoken';
+const SESSION_JWT_SECRET = process.env.SESSION_JWT_SECRET || 'flair-session-secret';
+const SESSION_JWT_EXPIRES_IN_SECONDS = Number(process.env.SESSION_JWT_EXPIRES_IN_SECONDS || 86400);
 export const getSignInData = async (req, res) => {
     // Wrap in try/catch so we never drop the connection on validation errors (prevents socket hang-ups)
     try {
@@ -12,7 +21,7 @@ export const getSignInData = async (req, res) => {
         res.status(400).json({ success: false, error: err?.message || 'Failed to create sign-in payload' });
     }
 };
-export const signIn = (req, res) => {
+export const signIn = async (req, res) => {
     const { body } = req;
     // General connect + sign in workflow
     if (body.token) {
@@ -22,7 +31,9 @@ export const signIn = (req, res) => {
                 res.status(400).json({ success: false, error: "Invalid token format." });
                 return;
             }
-            if (verifyGenSignInFirstTime(token, 'signin')) {
+            const walletPrincipal = verifyGenSignInFirstTime(token, 'signin');
+            await ensureWalletIdentityForWalletPrincipal(walletPrincipal);
+            if (walletPrincipal) {
                 res.status(200).json({ success: true });
                 return;
             }
@@ -50,4 +61,95 @@ export const signIn = (req, res) => {
     }
     else
         res.status(400).json({ success: false });
+};
+export const linkWallet = async (req, res) => {
+    try {
+        const principal = authorizedPk(res);
+        if (!principal) {
+            res.status(401).json({ success: false, error: 'Unauthorized.' });
+            return;
+        }
+        const { token } = req.body;
+        if (!token || typeof token !== 'string' || !token.includes('.')) {
+            res.status(400).json({ success: false, error: 'Invalid wallet token format.' });
+            return;
+        }
+        const walletPrincipal = verifyGenSignInFirstTime(token, 'signin');
+        const userId = await resolveUserIdFromPrincipal(principal);
+        if (!userId) {
+            res.status(404).json({ success: false, error: 'Authenticated user account not found.' });
+            return;
+        }
+        await linkWalletIdentityToUser(userId, walletPrincipal);
+        res.status(200).json({ success: true, data: { principal: walletPrincipal } });
+    }
+    catch (err) {
+        const message = err?.message || 'Failed to link principal.';
+        if (message.includes('already linked to another account')) {
+            res.status(409).json({ success: false, error: message });
+            return;
+        }
+        console.error('Error linking wallet:', err);
+        res.status(400).json({ success: false, error: message });
+    }
+};
+export const linkSSH = async (req, res) => {
+    try {
+        const principal = authorizedPk(res);
+        if (!principal) {
+            res.status(401).json({ success: false, error: 'Unauthorized.' });
+            return;
+        }
+        const { publicKey } = req.body;
+        if (!publicKey || typeof publicKey !== 'string' || !publicKey.trim().startsWith('ssh-ed25519 ')) {
+            res.status(400).json({ success: false, error: 'Invalid SSH public key format.' });
+            return;
+        }
+        const userId = await resolveUserIdFromPrincipal(principal);
+        if (!userId) {
+            res.status(404).json({ success: false, error: 'Authenticated user account not found.' });
+            return;
+        }
+        const sshIdentity = await linkSSHIdentityToUser(userId, publicKey.trim());
+        res.status(200).json({ success: true, data: { principal: sshIdentity.principal } });
+    }
+    catch (err) {
+        const message = err?.message || 'Failed to link SSH identity.';
+        if (message.includes('already linked to another account')) {
+            res.status(409).json({ success: false, error: message });
+            return;
+        }
+        console.error('Error linking SSH key:', err);
+        res.status(400).json({ success: false, error: message });
+    }
+};
+export const googleSignIn = async (req, res) => {
+    try {
+        const { idToken } = req.body;
+        if (!idToken || typeof idToken !== 'string') {
+            res.status(400).json({ success: false, error: 'Google idToken is required.' });
+            return;
+        }
+        const googlePayload = await verifyGoogleIdToken(idToken);
+        const identity = await ensureGoogleIdentityForSubject(googlePayload.sub, {
+            email: googlePayload.email,
+            name: googlePayload.name,
+            picture: googlePayload.picture,
+        });
+        const sessionToken = jwt.sign({
+            sub: identity.principal,
+        }, SESSION_JWT_SECRET, { expiresIn: SESSION_JWT_EXPIRES_IN_SECONDS });
+        res.status(200).json({
+            success: true,
+            data: {
+                sessionToken,
+                principal: identity.principal,
+                userId: identity.userId,
+            },
+        });
+    }
+    catch (err) {
+        console.error('Error in Google sign-in:', err);
+        res.status(401).json({ success: false, error: err?.message || 'Google sign-in failed.' });
+    }
 };

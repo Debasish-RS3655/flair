@@ -7,6 +7,7 @@ const branchRouter = Router();
 branchRouter.get('/', branchController.getAllBranches);
 // Get a specific branch in a repository
 branchRouter.get('/hash/:branchHash', branchController.getBranchByHash);
+branchRouter.get('/name/:name', branchController.getBranchByName);
 // Create a new branch in a repository
 branchRouter.post('/create', branchController.createBranch);
 // Only thing we can update or change in a branch is its description and the write access ids
@@ -15,6 +16,8 @@ branchRouter.patch('/hash/:branchHash/update', branchController.updateBranch);
 branchRouter.delete('/hash/:branchHash/delete', branchController.deleteBranch);
 // Fork a branch within the same repository
 branchRouter.post('/hash/:branchHash/fork', branchController.forkBranch);
+// Set default branch (owner/admin only)
+branchRouter.patch('/hash/:branchHash/default/set', branchController.setDefaultBranch);
 branchRouter.use('/hash/:branchHash/commit', async (req, res, next) => {
     const { branchHash } = req.params;
     const matchBranch = await prisma.branch.findFirst({

@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma/index.js';
+import { CommitStatus } from '@prisma/client';
 import { authorizedPk } from '../middleware/auth/authHandler.js';
-import { extractMetricsAfter } from '../lib/sharedFolder/index.js';
 import storageProvider from '../lib/storage/index.js';
 import { constructIPFSUrl } from '../lib/ipfs/ipfs.js';
 import jwt from 'jsonwebtoken';
@@ -8,13 +8,234 @@ import config from '../../config.js';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidV4 } from 'uuid';
+import { createHash, createPublicKey, verify as cryptoVerify } from 'crypto';
+import nacl from 'tweetnacl';
+import bs58 from 'bs58';
 import { convertCommitToNft } from '../lib/nft/nft.js';
 import { umi } from '../lib/nft/umi.js';
+import { getSSHIdentityForUserAndFingerprint, resolveUserIdFromPrincipal } from '../lib/auth/identity/index.js';
 const ZKP_JWT_SECRET = process.env.ZKP_JWT_SECRET || 'super-secret-commit-generation';
 const COMMIT_JWT_SECRET = process.env.COMMIT_JWT_SECRET || 'another-super-secret-commit-generation';
 const SESSION_EXPIRY_MINUTES = config.commit.session.expiryMinutes || 10;
 const BLOCK_DURATION_MINUTES = config.commit.session.blockDurationMinutes || 2;
 const GENESIS_COMMIT_HASH = config.commit.genesis.hash || '_GENESIS_COMMIT_';
+function normalizeJsonValue(input) {
+    if (Array.isArray(input)) {
+        return input.map((item) => normalizeJsonValue(item));
+    }
+    if (input && typeof input === 'object') {
+        const record = input;
+        const sortedKeys = Object.keys(record).sort();
+        const normalized = {};
+        for (const key of sortedKeys) {
+            normalized[key] = normalizeJsonValue(record[key]);
+        }
+        return normalized;
+    }
+    return input;
+}
+function buildCanonicalCommitPayload(payload) {
+    return {
+        sessionJti: payload.sessionJti,
+        signedAt: payload.signedAt,
+        paramsIpfsId: payload.paramsIpfsId,
+        paramHash: payload.paramHash,
+        previousCommitHash: payload.previousCommitHash,
+        architecture: payload.architecture,
+        architectureHash: payload.architectureHash,
+        commitType: payload.commitType,
+        message: payload.message,
+        metrics: normalizeJsonValue(payload.metrics)
+    };
+}
+function canonicalizeCommitPayload(payload) {
+    // SSH-MIGRATION: must byte-match CLI canonicalize_payload() before any signer swap.
+    const canonicalPayload = buildCanonicalCommitPayload(payload);
+    return JSON.stringify(canonicalPayload);
+}
+function computeCommitHash(payload) {
+    const canonicalJson = canonicalizeCommitPayload(payload);
+    const hash = createHash('sha256')
+        .update(canonicalJson)
+        .update('|')
+        .update(payload.previousCommitHash)
+        .digest('hex');
+    return hash;
+}
+function decodeOpenSshEd25519PublicKey(publicKey) {
+    const trimmed = publicKey.trim();
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 2 || parts[0] !== 'ssh-ed25519') {
+        return null;
+    }
+    try {
+        const blob = Buffer.from(parts[1], 'base64');
+        let offset = 0;
+        const readUInt32 = () => {
+            if (offset + 4 > blob.length)
+                return null;
+            const value = blob.readUInt32BE(offset);
+            offset += 4;
+            return value;
+        };
+        const readString = () => {
+            const length = readUInt32();
+            if (length === null || offset + length > blob.length)
+                return null;
+            const value = blob.subarray(offset, offset + length);
+            offset += length;
+            return value;
+        };
+        const keyType = readString();
+        const keyBytes = readString();
+        if (!keyType || !keyBytes)
+            return null;
+        if (keyType.toString('utf8') !== 'ssh-ed25519') {
+            return null;
+        }
+        return keyBytes;
+    }
+    catch {
+        return null;
+    }
+}
+function openSshEd25519ToPem(publicKey) {
+    const rawKeyBytes = decodeOpenSshEd25519PublicKey(publicKey);
+    if (!rawKeyBytes)
+        return null;
+    const spkiPrefix = Buffer.from('302a300506032b6570032100', 'hex');
+    const der = Buffer.concat([spkiPrefix, Buffer.from(rawKeyBytes)]);
+    const base64 = der.toString('base64').match(/.{1,64}/g)?.join('\n');
+    if (!base64)
+        return null;
+    return `-----BEGIN PUBLIC KEY-----\n${base64}\n-----END PUBLIC KEY-----\n`;
+}
+// SSH-MIGRATION: resolve commit-signing identity from SSH auth provider, not WALLET/Solana only.
+// Google-linked SSH keys and provider selection logic will need updating here.
+async function getUserPublicKeyInfo(pk, sshKeyFingerprint) {
+    try {
+        if (sshKeyFingerprint) {
+            const userId = await resolveUserIdFromPrincipal(pk);
+            if (!userId) {
+                console.warn(`User with principal ${pk} not found`);
+                return null;
+            }
+            const sshIdentity = await getSSHIdentityForUserAndFingerprint(userId, sshKeyFingerprint);
+            if (!sshIdentity) {
+                console.warn(`No SSH identity found for user ${userId} and fingerprint ${sshKeyFingerprint}`);
+                return null;
+            }
+            return {
+                provider: 'SSH',
+                sshPublicKey: sshIdentity.publicKey,
+            };
+        }
+        // Find the user by principal
+        const user = await prisma.user.findUnique({
+            where: { principal: pk }
+        });
+        if (!user) {
+            console.warn(`User with principal ${pk} not found`);
+            return null;
+        }
+        // Find the associated auth identity to determine provider
+        const authIdentity = await prisma.authIdentity.findFirst({
+            where: {
+                userId: user.id
+            }
+        });
+        if (!authIdentity) {
+            console.warn(`No auth identity found for user ${user.id}`);
+            return null;
+        }
+        // SSH-MIGRATION: replace WALLET-only gate with SSH (or linked-SSH) provider check.
+        // Only WALLET users can sign commits (Solana wallets)
+        // Google auth users cannot create signatures
+        if (authIdentity.provider !== 'WALLET') {
+            console.warn(`User authenticated via ${authIdentity.provider} (subject: ${authIdentity.subject}) cannot sign commits. Only WALLET provider can sign.`);
+            return null;
+        }
+        // SSH-MIGRATION: load stored SSH public key for principal pk instead of bs58 Solana decode.
+        // For WALLET users, the principal IS the Solana public key in base58 format
+        // Decode base58 to get the public key bytes for ED25519 verification
+        try {
+            const publicKeyBytes = bs58.decode(pk);
+            return {
+                provider: 'WALLET',
+                publicKeyBytes,
+            };
+        }
+        catch (decodeErr) {
+            console.error(`Failed to decode Solana address ${pk}:`, decodeErr);
+            return null;
+        }
+    }
+    catch (err) {
+        console.error('Error fetching user public key:', err);
+        return null;
+    }
+}
+// SSH-MIGRATION: replace tweetnacl detached ED25519 verify with OpenSSH signature
+// verification (e.g. node:crypto or sshpk). Align canonicalPayload serialization
+// with CLI canonicalize_payload before verifying.
+function verifySignature(canonicalPayload, signatureHex, publicKeyInfo) {
+    try {
+        const payloadBytes = Buffer.from(canonicalPayload, 'utf-8');
+        const signatureBytes = /^[0-9a-fA-F]+$/.test(signatureHex) && signatureHex.length % 2 === 0
+            ? Buffer.from(signatureHex, 'hex')
+            : Buffer.from(signatureHex, 'base64');
+        if (publicKeyInfo.provider === 'SSH') {
+            if (!publicKeyInfo.sshPublicKey)
+                return false;
+            const pem = openSshEd25519ToPem(publicKeyInfo.sshPublicKey);
+            if (!pem)
+                return false;
+            const publicKeyObject = createPublicKey(pem);
+            return cryptoVerify(null, payloadBytes, publicKeyObject, signatureBytes);
+        }
+        if (!publicKeyInfo.publicKeyBytes)
+            return false;
+        return nacl.sign.detached.verify(payloadBytes, signatureBytes, publicKeyInfo.publicKeyBytes);
+    }
+    catch (err) {
+        console.error('Error verifying signature:', err);
+        return false;
+    }
+}
+async function verifyCommitChainIntegrity(parentCommitHash, branchId) {
+    /**
+     * Merkle tree chain verification: ensure the parent commit exists and is properly linked.
+     * This prevents orphaned or broken chains.
+     */
+    // Genesis is always valid
+    if (parentCommitHash === GENESIS_COMMIT_HASH) {
+        return { valid: true };
+    }
+    try {
+        // Verify parent commit exists in the same branch
+        const parentCommit = await prisma.commit.findFirst({
+            where: {
+                commitHash: parentCommitHash,
+                branchId: branchId,
+                isDeleted: false
+            }
+        });
+        if (!parentCommit) {
+            return {
+                valid: false,
+                error: `Parent commit ${parentCommitHash.substring(0, 16)}... not found in this branch or is deleted.`
+            };
+        }
+        return { valid: true };
+    }
+    catch (err) {
+        console.error('Error verifying commit chain:', err);
+        return {
+            valid: false,
+            error: 'Failed to verify commit chain integrity.'
+        };
+    }
+}
 // Helper: Block user for 2 minutes
 async function blockUser(pk) {
     const blockedUntil = new Date(Date.now() + BLOCK_DURATION_MINUTES * 60 * 1000);
@@ -202,23 +423,6 @@ export const initiateCommitSession = async (req, res) => {
                 return;
             }
         }
-        // Check for existing children of the parent in this branch
-        const existingChildren = await prisma.commit.count({
-            where: { branchId, previousCommitHash: parentCommitHash }
-        });
-        if (existingChildren > 0) {
-            // Parent already has a child - check repository commit policy
-            if (repo.commitPolicy === 'SERIAL') {
-                res.status(409).json({
-                    error: {
-                        message: 'Parent commit already has a child. Repository policy is SERIAL - cannot create conflicting commit.',
-                        code: 'SERIAL_CONFLICT'
-                    }
-                });
-                return;
-            }
-            // If policy is FORK or MERGE, allow initiation (fork will be created during finalize)
-        }
         const jti = uuidV4();
         const expiresAt = new Date(Date.now() + SESSION_EXPIRY_MINUTES * 60 * 1000);
         const session = await prisma.commitCreationSession.create({
@@ -312,10 +516,26 @@ export const checkZKMLProof = async (req, res) => {
 export const uploadZKMLProofs = async (req, res) => {
     try {
         const pk = authorizedPk(res);
-        const { sessionId, initiateToken, zkmlToken, proof, settings, verification_key } = req.body;
-        if (!sessionId || !initiateToken || !zkmlToken || !proof || !settings || !verification_key) {
+        const { sessionId, initiateToken, zkmlToken } = req.body;
+        const files = req.files;
+        if (!sessionId || !initiateToken || !zkmlToken) {
             res.status(400).json({
-                error: { message: 'All fields (sessionId, initiateToken, zkmlToken, proof, settings, verification_key) are required.' }
+                error: { message: 'All fields (sessionId, initiateToken, zkmlToken) are required.' }
+            });
+            return;
+        }
+        if (!files || !files.proof || !files.settings || !files.verification_key) {
+            res.status(400).json({
+                error: { message: 'All three files (proof, settings, verification_key) must be uploaded.' }
+            });
+            return;
+        }
+        const proofFile = files.proof[0];
+        const settingsFile = files.settings[0];
+        const vkFile = files.verification_key[0];
+        if (!proofFile || !settingsFile || !vkFile) {
+            res.status(400).json({
+                error: { message: 'One or more ZKML files are missing.' }
             });
             return;
         }
@@ -350,9 +570,13 @@ export const uploadZKMLProofs = async (req, res) => {
             res.status(403).json({ error: { message: 'Invalid or expired session.' } });
             return;
         }
-        const proofUpload = await storageProvider.add(proof, { pin: true });
-        const settingsUpload = await storageProvider.add(settings, { pin: true });
-        const vkUpload = await storageProvider.add(verification_key, { pin: true });
+        // Upload binary files to IPFS
+        const proofPath = path.join(proofFile.destination, proofFile.filename);
+        const settingsPath = path.join(settingsFile.destination, settingsFile.filename);
+        const vkPath = path.join(vkFile.destination, vkFile.filename);
+        const proofUpload = await storageProvider.add(proofPath, { pin: true });
+        const settingsUpload = await storageProvider.add(settingsPath, { pin: true });
+        const vkUpload = await storageProvider.add(vkPath, { pin: true });
         const allowed = zkmlJwt.allowedCids || {};
         if (proofUpload.cid.toString() !== allowed.proofCid ||
             settingsUpload.cid.toString() !== allowed.settingsCid ||
@@ -369,8 +593,8 @@ export const uploadZKMLProofs = async (req, res) => {
             create: {
                 cid: proofUpload.cid.toString(),
                 uri: constructIPFSUrl(proofUpload.cid),
-                extension: 'json',
-                size: proofUpload.size || 0
+                extension: 'zlib',
+                size: proofUpload.size || proofFile.size || 0
             }
         });
         const settingsIpfs = await prisma.ipfsObject.upsert({
@@ -379,8 +603,8 @@ export const uploadZKMLProofs = async (req, res) => {
             create: {
                 cid: settingsUpload.cid.toString(),
                 uri: constructIPFSUrl(settingsUpload.cid),
-                extension: 'json',
-                size: settingsUpload.size || 0
+                extension: 'zlib',
+                size: settingsUpload.size || settingsFile.size || 0
             }
         });
         const vkIpfs = await prisma.ipfsObject.upsert({
@@ -389,8 +613,8 @@ export const uploadZKMLProofs = async (req, res) => {
             create: {
                 cid: vkUpload.cid.toString(),
                 uri: constructIPFSUrl(vkUpload.cid),
-                extension: 'json',
-                size: vkUpload.size || 0
+                extension: 'zlib',
+                size: vkUpload.size || vkFile.size || 0
             }
         });
         const existingProof = await prisma.zKMLProof.findFirst({
@@ -424,6 +648,15 @@ export const uploadZKMLProofs = async (req, res) => {
             settingsIpfsId: settingsIpfs.id,
             vkIpfsId: vkIpfs.id
         }, ZKP_JWT_SECRET, { expiresIn: `${SESSION_EXPIRY_MINUTES}m` });
+        // Cleanup uploaded files from local storage
+        try {
+            fs.unlinkSync(proofPath);
+            fs.unlinkSync(settingsPath);
+            fs.unlinkSync(vkPath);
+        }
+        catch (cleanupErr) {
+            console.error('Error cleaning up ZKML files:', cleanupErr);
+        }
         res.status(200).json({
             success: true,
             message: 'ZKML files uploaded successfully. Proceed to finalize.',
@@ -559,7 +792,8 @@ export const finalizeCommit = async (req, res) => {
     try {
         const pk = authorizedPk(res);
         const { branchId, repoId } = req;
-        const { message, paramHash, architecture, initiateToken, zkmlReceiptToken, paramsReceiptToken } = req.body;
+        const { message, commitHash, // commit hash will be computed in the server side (client value ignored)
+        paramHash, architecture, metrics, initiateToken, zkmlReceiptToken, paramsReceiptToken, commitSignature, sshKeyFingerprint, signedAt } = req.body;
         if (!initiateToken) {
             res.status(401).json({ error: { message: 'Missing initiateToken. Call /create/initiate first.' } });
             return;
@@ -643,6 +877,24 @@ export const finalizeCommit = async (req, res) => {
             res.status(403).json({ error: { message: 'Invalid or expired session. Expected PARAMS_UPLOADED status.' } });
             return;
         }
+        if (!signedAt || typeof signedAt !== 'string') {
+            res.status(400).json({ error: { message: 'signedAt is required for replay protection.' } });
+            return;
+        }
+        const signedAtDate = new Date(signedAt);
+        if (Number.isNaN(signedAtDate.getTime())) {
+            res.status(400).json({ error: { message: 'signedAt must be a valid ISO-8601 timestamp.' } });
+            return;
+        }
+        const now = new Date();
+        const allowedSkewMs = 2 * 60 * 1000;
+        const sessionCreatedAtMs = session.createdAt.getTime();
+        const sessionExpiresAtMs = session.expiresAt ? session.expiresAt.getTime() : now.getTime() + allowedSkewMs;
+        if (signedAtDate.getTime() < sessionCreatedAtMs - allowedSkewMs || signedAtDate.getTime() > sessionExpiresAtMs + allowedSkewMs || signedAtDate.getTime() > now.getTime() + allowedSkewMs) {
+            await recordSessionError(sessionId, pk);
+            res.status(403).json({ error: { message: 'Commit signature is stale or outside the allowed replay window.' } });
+            return;
+        }
         const repo = await prisma.repository.findUnique({ where: { id: repoId }, include: { baseModel: true } });
         if (!repo?.baseModelId) {
             res.status(400).json({ error: { message: 'Base model not uploaded. Cannot create commit.' } });
@@ -659,9 +911,58 @@ export const finalizeCommit = async (req, res) => {
             res.status(400).json({ error: { message: 'paramHash and architecture are required.' } });
             return;
         }
-        const commitHash = uuidV4();
-        const committer = await prisma.user.findFirst({ where: { wallet: pk } });
-        if (!committer) {
+        // Compute authoritative commitHash from canonical payload and parent commit hash.
+        // Note: client-supplied commitHash is ignored; server is authoritative.
+        const commitTypeRaw = req.body?.commitType?.toUpperCase();
+        const commitType = commitTypeRaw === 'CHECKPOINT' ? 'CHECKPOINT' : 'DELTA';
+        const parentCommitHash = sessionJwt.parentCommitHash;
+        const canonicalPayload = {
+            sessionJti: sessionJwt.jti,
+            signedAt,
+            paramsIpfsId: paramsReceiptJwt.paramsIpfsId,
+            paramHash,
+            previousCommitHash: parentCommitHash,
+            architecture,
+            architectureHash: null,
+            commitType,
+            message,
+            metrics: metrics || {}
+        };
+        const computedCommitHash = computeCommitHash(canonicalPayload);
+        if (session.jti !== sessionJwt.jti) {
+            await recordSessionError(sessionId, pk);
+            res.status(403).json({ error: { message: 'Session nonce mismatch. Replay protection failed.' } });
+            return;
+        }
+        // SSH-MIGRATION: commit attestation block — swap Solana verify path for SSH verify;
+        // commitSignature field name/format may change; canonicalPayloadStr must match CLI bytes.
+        // Verify commit signature
+        if (!commitSignature) {
+            res.status(400).json({ error: { message: 'Commit signature is required.' } });
+            return;
+        }
+        if (!sshKeyFingerprint || typeof sshKeyFingerprint !== 'string') {
+            res.status(400).json({ error: { message: 'sshKeyFingerprint is required for SSH-signed commits.' } });
+            return;
+        }
+        const publicKeyInfo = await getUserPublicKeyInfo(pk, sshKeyFingerprint);
+        if (!publicKeyInfo) {
+            res.status(401).json({
+                error: {
+                    message: 'User cannot sign commits. Register a valid SSH key first.'
+                }
+            });
+            return;
+        }
+        const canonicalPayloadStr = canonicalizeCommitPayload(canonicalPayload);
+        const isSignatureValid = verifySignature(canonicalPayloadStr, commitSignature, publicKeyInfo);
+        if (!isSignatureValid) {
+            await recordSessionError(sessionId, pk);
+            res.status(403).json({ error: { message: 'Commit signature verification failed. Signature does not match canonical payload.' } });
+            return;
+        }
+        const committerId = await resolveUserIdFromPrincipal(pk);
+        if (!committerId) {
             res.status(401).json({ error: { message: 'User not found.' } });
             return;
         }
@@ -670,41 +971,47 @@ export const finalizeCommit = async (req, res) => {
             res.status(404).json({ error: { message: 'Branch does not exist.' } });
             return;
         }
-        // Parent commit hash was validated during initiation
-        const parentCommitHash = sessionJwt.parentCommitHash;
-        if (await prisma.commit.count({ where: { commitHash } })) {
-            res.status(400).json({ error: { message: 'Commit hash already exists.' } });
+        // Verify commit chain integrity: parent commit must exist in this branch
+        const chainVerification = await verifyCommitChainIntegrity(parentCommitHash, branchId);
+        if (!chainVerification.valid) {
+            await recordSessionError(sessionId, pk);
+            res.status(409).json({
+                error: {
+                    message: `Commit chain verification failed: ${chainVerification.error}`,
+                    code: 'CHAIN_INTEGRITY_ERROR'
+                }
+            });
+            return;
+        }
+        // Check commitHash uniqueness (using computed hash)
+        if (await prisma.commit.count({ where: { commitHash: computedCommitHash } })) {
+            res.status(409).json({ error: { message: 'Commit with same canonical payload already exists.' } });
             return;
         }
         if (await prisma.commit.count({ where: { paramHash } })) {
             res.status(400).json({ error: { message: 'Parameter hash already exists.' } });
             return;
         }
-        // Check if fork is needed (only for FORK policy - SERIAL was rejected at initiate)
-        const existingChildren = await prisma.commit.count({
-            where: { branchId, previousCommitHash: parentCommitHash }
-        });
-        const forkNeeded = existingChildren > 0 && branch.repository.commitPolicy === 'FORK';
-        let targetBranchId = branchId;
-        let forkedBranch = null;
-        const sharedFolder = await prisma.sharedFolderFile.findFirst({
-            where: { branchId, committerAddress: pk },
-            orderBy: { createdAt: 'desc' }
-        });
-        if (!sharedFolder) {
-            res.status(400).json({ error: { message: 'Shared folder not found. Please train and commit again.' } });
-            return;
+        // Metrics are supplied directly by the commit finalization payload.
+        // This removes runtime dependence on shared-folder data.
+        let metricsFinal = {};
+        if (metrics !== undefined && metrics !== null) {
+            let parsedMetrics = metrics;
+            if (typeof metrics === 'string') {
+                try {
+                    parsedMetrics = JSON.parse(metrics);
+                }
+                catch {
+                    res.status(400).json({ error: { message: 'metrics must be valid JSON when provided as a string.' } });
+                    return;
+                }
+            }
+            if (typeof parsedMetrics !== 'object' || parsedMetrics === null || Array.isArray(parsedMetrics)) {
+                res.status(400).json({ error: { message: 'metrics must be a JSON object.' } });
+                return;
+            }
+            metricsFinal = parsedMetrics;
         }
-        const metricsRaw = extractMetricsAfter(sharedFolder);
-        const metricsExtracted = metricsRaw.at(-1);
-        if (!metricsExtracted) {
-            res.status(400).json({ error: { message: 'Metrics not found in the shared folder.' } });
-            return;
-        }
-        const metricsFinal = {
-            accuracy: parseFloat(metricsExtracted.accuracy),
-            loss: parseFloat(metricsExtracted.loss),
-        };
         const paramsIpfs = await prisma.ipfsObject.findUnique({
             where: { id: paramsReceiptJwt.paramsIpfsId }
         });
@@ -731,35 +1038,23 @@ export const finalizeCommit = async (req, res) => {
             if (zkmlRelationInput) {
                 paramsCreateInput.ZKMLProof = zkmlRelationInput;
             }
-            if (forkNeeded) {
-                const forkBranchName = `${branch.name}-fork-${uuidV4().split('-')[0]}`;
-                forkedBranch = await tx.branch.create({
-                    data: {
-                        name: forkBranchName,
-                        description: `Forked from ${branch.name} at ${parentCommitHash}`,
-                        repositoryId: branch.repositoryId,
-                        branchHash: uuidV4(),
-                        ...(branch.latestParamsId && { latestParamsId: branch.latestParamsId })
-                    }
-                });
-                targetBranchId = forkedBranch.id;
-            }
             const newCommit = await tx.commit.create({
                 data: {
                     committerAddress: pk,
                     message,
                     metrics: metricsFinal,
-                    branchId: targetBranchId,
-                    commitHash,
+                    branchId,
+                    commitHash: computedCommitHash,
                     previousCommitHash: parentCommitHash,
-                    status: 'MERGED', // the status is set to MERGED directly for simplicity for now
+                    commitType,
+                    status: 'PENDING',
                     verified: !!zkmlRelationInput,
                     architecture,
                     paramHash,
                     params: {
                         create: paramsCreateInput,
                     },
-                    committerId: committer.id
+                    committerId
                 },
                 include: {
                     params: {
@@ -767,7 +1062,7 @@ export const finalizeCommit = async (req, res) => {
                     }
                 }
             });
-            await tx.branch.update({ where: { id: targetBranchId }, data: { updatedAt: new Date() } });
+            await tx.branch.update({ where: { id: branchId }, data: { updatedAt: new Date() } });
             await tx.repository.update({ where: { id: repoId }, data: { updatedAt: new Date() } });
             await tx.commitCreationSession.update({ where: { id: sessionId }, data: { consumed: true, status: 'FINALIZED' } });
             // Add committer to contributors list if not already present
@@ -783,10 +1078,7 @@ export const finalizeCommit = async (req, res) => {
         });
         res.status(201).json({
             data: commit,
-            forkedBranch: forkedBranch ? { branchHash: forkedBranch.branchHash, name: forkedBranch.name } : null,
-            message: forkedBranch
-                ? `Parent already used. Commit created on new branch ${forkedBranch.name}.`
-                : 'Commit created successfully.'
+            message: 'Commit created successfully.'
         });
     }
     catch (error) {
@@ -841,12 +1133,73 @@ export const finalizeCommit = async (req, res) => {
 };
 export const createCommitNft = async (req, res, next) => {
     try {
+        const pk = authorizedPk(res);
         const { commitHash } = req.params;
+        const commit = await prisma.commit.findFirst({
+            where: { commitHash },
+            include: {
+                branch: {
+                    include: {
+                        repository: true
+                    }
+                },
+                nft: true
+            }
+        });
+        if (!commit) {
+            res.status(404).send({ error: { message: 'Commit not found.' } });
+            return;
+        }
+        if (commit.nft) {
+            res.status(409).send({ error: { message: 'This commit has already been minted as an NFT.' } });
+            return;
+        }
+        if (commit.status === CommitStatus.REJECTED) {
+            res.status(400).send({ error: { message: 'Rejected commit cannot be converted into an Nft.' } });
+            return;
+        }
+        if (commit.status === CommitStatus.MERGER) {
+            res.status(400).send({ error: { message: 'Commit is a merger commit, and cannot be converted into an Nft.' } });
+            return;
+        }
+        const committerAddress = commit.committerAddress?.toLowerCase();
+        const requesterAddress = pk?.toLowerCase();
+        const isCommitter = !!committerAddress && committerAddress === requesterAddress;
+        if (!isCommitter) {
+            res.status(403).send({ error: { message: 'Unauthorized. Only the original committer can mint this commit NFT.' } });
+            return;
+        }
         const asset = await convertCommitToNft(umi, commitHash);
         res.status(200).json({ data: asset });
     }
     catch (err) {
         res.status(400).send({ error: { message: `${err}` } });
         return;
+    }
+};
+export const getCommitStatuses = async (req, res) => {
+    try {
+        const { branchId } = req;
+        const sinceCommitHash = req.query.since;
+        let commits;
+        if (sinceCommitHash && sinceCommitHash !== '_GENESIS_COMMIT_') {
+            // Simply fetch all commits for this branch as it's not very heavy
+            // Client side logic can slice if needed, or we can just return all for sync.
+            commits = await prisma.commit.findMany({
+                where: { branchId },
+                select: { commitHash: true, status: true }
+            });
+        }
+        else {
+            commits = await prisma.commit.findMany({
+                where: { branchId },
+                select: { commitHash: true, status: true }
+            });
+        }
+        res.status(200).json({ data: commits });
+    }
+    catch (err) {
+        console.error('Error fetching commit statuses:', err);
+        res.status(500).send({ error: { message: 'Internal Server Error' } });
     }
 };

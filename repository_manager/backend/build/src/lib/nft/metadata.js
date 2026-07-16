@@ -1,9 +1,13 @@
 // metadata generator for commit and repository Nfts
 // Debashish Buragohain
+import { CommitStatus } from "@prisma/client";
 import { prisma } from "../prisma/index.js";
 import { constructIPFSUrl } from "../../lib/ipfs/ipfs.js";
 // function to create the metadata of the commit Nft
 export const createCommitMetadata = async (commit) => {
+    if (commit.status == CommitStatus.REJECTED) {
+        throw new Error('Rejected commit cannot be converted into an Nft.');
+    }
     const metadata = {};
     metadata.commitHash = commit.commitHash;
     const branch = await prisma.branch.findUnique({ where: { id: commit.branchId } });
@@ -24,37 +28,38 @@ export const createCommitMetadata = async (commit) => {
     }
     metadata.baseModelHash = repo.baseModelHash;
     // the merger commit is removed in v2 but the logic will be applied for check point commits in the near future
-    // if (commit.status == 'MERGERCOMMIT') {
-    //     throw new Error('Commit is a merger commit, and cannot be converted into an Nft.');
-    // }
+    if (commit.status == CommitStatus.MERGER) {
+        throw new Error('Commit is a merger commit, and cannot be converted into an Nft.');
+    }
     metadata.status = commit.status;
     metadata.committer = commit.committerAddress;
     metadata.paramHash = commit.paramHash;
     metadata.message = commit.message;
-    // if (commit.status == 'REJECTED') {
-    //     if (!commit.rejectedMessage) {
-    //         throw new Error('Rejection message not present in rejected commit.');
-    //     }
-    //     metadata.messageIfRejected = commit.rejectedMessage;
-    // }
     metadata.createdAt = commit.createdAt.toISOString();
     metadata.localMetrics = parseMetrics(commit.metrics);
     return metadata;
 };
 // parse the metric values
 export function parseMetrics(metric) {
-    // Ensure metric is a valid object
-    if (typeof metric !== "object" || metric === null || Array.isArray(metric)) {
+    // Allow missing/null metrics by returning an empty metadata object.
+    if (metric === null || metric === undefined) {
+        return {};
+    }
+    if (typeof metric !== "object" || Array.isArray(metric)) {
         throw new Error("Invalid commit metrics: Expected an object.");
     }
-    const { accuracy, loss } = metric;
-    if (!accuracy) {
-        throw new Error('Accuracy not present in commit metric.');
+    const parsed = {};
+    for (const [key, value] of Object.entries(metric)) {
+        if (value === null ||
+            typeof value === "string" ||
+            typeof value === "number" ||
+            typeof value === "boolean") {
+            parsed[key] = value;
+            continue;
+        }
+        throw new Error(`Invalid commit metric value for '${key}'. Expected string, number, boolean, or null.`);
     }
-    if (!loss) {
-        throw new Error('Loss not present in commit metric.');
-    }
-    return { accuracy, loss };
+    return parsed;
 }
 // create the metadata for uploading in the collection
 export const createRepositoryMetadata = async (repo) => {

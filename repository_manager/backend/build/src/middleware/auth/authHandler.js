@@ -3,7 +3,9 @@
 // Debashish Buragohain
 import { siwsAuth } from "./siwsAuth.js";
 import { genAuth } from "./web3Auth.js";
+import { jwtAuth } from './jwtAuth.js';
 import { authorizedPk } from "./web3Auth.js";
+import { authorizedPrincipal } from "./web3Auth.js";
 export const authHandler = (ctx) => (req, res, next) => {
     const authHeader = req.header('Authorization');
     if (!authHeader) {
@@ -18,8 +20,12 @@ export const authHandler = (ctx) => (req, res, next) => {
     else if (authHeader.includes('siws')) {
         siwsAuth(ctx)(req, res, next);
     }
+    else if (authHeader.startsWith('Bearer ')) {
+        jwtAuth(ctx)(req, res, next);
+    }
     else
         res.status(400).send({ error: { message: 'Invalid sign in strategy.' } });
 };
 // both the public key functions from both strategies do exactly the same thing so it make sense to use any of them
 export { authorizedPk };
+export { authorizedPrincipal };

@@ -53,3 +53,25 @@ export const paramsUploader = multer({
     fileFilter: paramsFileFilter,
     limits: { fileSize: maxParamsSize * 1024 * 1024 }
 }).single('params');
+// ZKML files uploader - accepts three compressed binary files
+const zkmlFileFilter = (req, file, cb) => {
+    // Accept .zlib or any binary format for ZKML proofs
+    const zkmlExt = file.originalname.split(".").pop()?.toLowerCase();
+    // We're accepting compressed binary files, so we're lenient with extensions
+    if (file.fieldname === 'proof' || file.fieldname === 'settings' || file.fieldname === 'verification_key') {
+        req.fileExtension = zkmlExt || 'zlib';
+        cb(null, true);
+    }
+    else {
+        cb(new Error(`Invalid field name! Must be 'proof', 'settings', or 'verification_key'.`));
+    }
+};
+export const zkmlUploader = multer({
+    storage,
+    fileFilter: zkmlFileFilter,
+    limits: { fileSize: 50 * 1024 * 1024 } // 50MB max for ZKML files
+}).fields([
+    { name: 'proof', maxCount: 1 },
+    { name: 'settings', maxCount: 1 },
+    { name: 'verification_key', maxCount: 1 }
+]);

@@ -21,6 +21,13 @@ export async function uploadModel(req, res) {
             res.status(400).send({ error: { message: 'Repository does not exist to upload the base model into.' } });
             return;
         }
+        // Check if user is owner or admin
+        const isOwner = repo.ownerAddress === pk;
+        const isAdmin = repo.adminIds.includes(pk);
+        if (!isOwner && !isAdmin) {
+            res.status(403).send({ error: { message: 'Only the owner or admin can add models to this repository.' } });
+            return;
+        }
         if (repo.baseModel && repo.branches) {
             res.status(400).send({ error: { message: 'Model already uploaded to repository. ' } });
             return;
@@ -90,12 +97,20 @@ export async function uploadModel(req, res) {
 export async function deleteModel(req, res) {
     try {
         // First check if the same model hash is present in more than one repos
+        const pk = authorizedPk(res);
         const currentRepo = await prisma.repository.findUnique({
             where: { id: req.repoId },
             include: { baseModel: true }
         });
         if (!currentRepo) {
             res.status(404).send({ error: { message: 'Repository does not exist.' } });
+            return;
+        }
+        // Check if user is owner or admin
+        const isOwner = currentRepo.ownerAddress === pk;
+        const isAdmin = currentRepo.adminIds.includes(pk);
+        if (!isOwner && !isAdmin) {
+            res.status(403).send({ error: { message: 'Only the owner or admin can delete models from this repository.' } });
             return;
         }
         if (!currentRepo.baseModel || !currentRepo.baseModelId) {

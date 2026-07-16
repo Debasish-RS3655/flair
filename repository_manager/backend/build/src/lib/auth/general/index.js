@@ -2,7 +2,6 @@ import b58 from 'bs58';
 import { DateTime } from 'luxon';
 import { PublicKey } from '@solana/web3.js';
 import nacl from 'tweetnacl';
-import { userExists, createUser } from '../user/index.js';
 import { parseSignInMessage } from '../helper/abnf_parser.js';
 // returns the public key in case the user is authenticated
 export const verifyGenSignIn = (authHeader, action = 'signin') => {
@@ -66,15 +65,7 @@ export const verifyGenSignInFirstTime = (authToken, action = 'signin') => {
         throw new Error("Invalid action.");
     }
     console.log('public key signed in: ', pk);
-    userExists(pk)
-        .then(async (exists) => {
-        if (!exists) {
-            await createUser(pk);
-            console.log('New user created with wallet:', pk);
-        }
-    })
-        .catch((err) => console.error(`Error creating user: ${err}`));
-    return true;
+    return pk;
 };
 // same code as the import
 // // Include the parser function here, or import it from a separate file

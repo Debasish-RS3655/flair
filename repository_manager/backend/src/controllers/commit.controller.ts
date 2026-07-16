@@ -489,24 +489,7 @@ export const initiateCommitSession = async (req: Request, res: Response) => {
             }
         }
 
-        // Check for existing children of the parent in this branch
-        const existingChildren = await prisma.commit.count({
-            where: { branchId, previousCommitHash: parentCommitHash }
-        });
 
-        if (existingChildren > 0) {
-            // Parent already has a child - check repository commit policy
-            if (repo.commitPolicy === 'SERIAL') {
-                res.status(409).json({
-                    error: {
-                        message: 'Parent commit already has a child. Repository policy is SERIAL - cannot create conflicting commit.',
-                        code: 'SERIAL_CONFLICT'
-                    }
-                });
-                return;
-            }
-            // If policy is FORK or MERGE, allow initiation (fork will be created during finalize)
-        }
 
         const jti = uuidV4();
         const expiresAt = new Date(Date.now() + SESSION_EXPIRY_MINUTES * 60 * 1000);
@@ -1170,14 +1153,7 @@ export const finalizeCommit = async (req: Request, res: Response) => {
             return;
         }
 
-        // Check if fork is needed (only for FORK policy - SERIAL was rejected at initiate)
-        const existingChildren = await prisma.commit.count({
-            where: { branchId, previousCommitHash: parentCommitHash }
-        });
 
-        const forkNeeded = existingChildren > 0 && branch.repository.commitPolicy === 'FORK';
-        let targetBranchId = branchId;
-        let forkedBranch: any = null;
 
         // Metrics are supplied directly by the commit finalization payload.
         // This removes runtime dependence on shared-folder data.
@@ -1234,26 +1210,14 @@ export const finalizeCommit = async (req: Request, res: Response) => {
                 paramsCreateInput.ZKMLProof = zkmlRelationInput;
             }
 
-            if (forkNeeded) {
-                const forkBranchName = `${branch.name}-fork-${uuidV4().split('-')[0]}`;
-                forkedBranch = await tx.branch.create({
-                    data: {
-                        name: forkBranchName,
-                        description: `Forked from ${branch.name} at ${parentCommitHash}`,
-                        repositoryId: branch.repositoryId,
-                        branchHash: uuidV4(),
-                        ...(branch.latestParamsId && { latestParamsId: branch.latestParamsId })
-                    }
-                });
-                targetBranchId = forkedBranch.id;
-            }
+
 
             const newCommit = await tx.commit.create({
                 data: {
                     committerAddress: pk,
                     message,
                     metrics: metricsFinal,
-                    branchId: targetBranchId,
+                    branchId,
                     commitHash: computedCommitHash,
                     previousCommitHash: parentCommitHash,
                     commitType,
@@ -1273,7 +1237,7 @@ export const finalizeCommit = async (req: Request, res: Response) => {
                 }
             });
 
-            await tx.branch.update({ where: { id: targetBranchId }, data: { updatedAt: new Date() } });
+            await tx.branch.update({ where: { id: branchId }, data: { updatedAt: new Date() } });
             await tx.repository.update({ where: { id: repoId }, data: { updatedAt: new Date() } });
             await tx.commitCreationSession.update({ where: { id: sessionId }, data: { consumed: true, status: 'FINALIZED' } });
             
@@ -1292,10 +1256,7 @@ export const finalizeCommit = async (req: Request, res: Response) => {
 
         res.status(201).json({ 
             data: commit,
-            forkedBranch: forkedBranch ? { branchHash: forkedBranch.branchHash, name: forkedBranch.name } : null,
-            message: forkedBranch
-                ? `Parent already used. Commit created on new branch ${forkedBranch.name}.`
-                : 'Commit created successfully.'
+            message: 'Commit created successfully.'
         });
 
     } catch (error: any) {

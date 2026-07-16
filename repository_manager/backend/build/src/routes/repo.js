@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { branchRouter } from './branch.js';
 import { modelRouter } from './basemodel.js';
 import * as repoController from '../controllers/repo.controller.js';
+import { nftWalletLinkGate } from '../middleware/auth/nftWalletLinkGate.js';
 const repoRouter = Router();
 // Get all the repositories for the particular user
 repoRouter.get('/', repoController.getAllRepositories);
@@ -12,12 +13,14 @@ repoRouter.get('/name/:name', repoController.getRepositoryByName);
 repoRouter.get('/owner/:ownerAddress/name/:name', repoController.getRepositoryByOwnerAndName);
 // Get a specific repository given the repository hash
 repoRouter.get('/hash/:repoHash', repoController.getRepositoryByHash);
+// Clone repository: fetch repo + branches + latest commits for cloning
+repoRouter.get('/hash/:repoHash/clone', repoController.cloneRepository);
 // Create an empty repository
 repoRouter.post('/create', repoController.createRepository);
 // Update repository
 repoRouter.patch('/hash/:repoHash/update', repoController.updateRepository);
 // Convert to NFT collection route
-repoRouter.post('/hash/:repoHash/create_collection', repoController.createCollection);
+repoRouter.post('/hash/:repoHash/create_collection', nftWalletLinkGate, repoController.createCollection);
 // Delete repository
 repoRouter.delete('/hash/:repoHash/delete', repoController.deleteRepository);
 // Role management routes

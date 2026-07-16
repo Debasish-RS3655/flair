@@ -16,13 +16,6 @@ enum CommitStatus {
   MERGED
 }
 
-// three possible commit policies for commit overlapping
-enum CommitPolicy {
-  SERIAL
-  FORK
-  MERGE
-}
-
 // user model needed to be created
 model User {
   id                String        @id @default(auto()) @map("_id") @db.ObjectId
@@ -59,9 +52,6 @@ model Repository {
   // the base model CID can be fetched from `baseModel.cid`
   collection     Collection?        @relation(fields: [collectionId], references: [id])
   collectionId   String?            @unique @db.ObjectId
-  // the commit policy routes
-  commitPolicy   CommitPolicy       @default(MERGE)
-
   @@unique([ownerAddress, name])
 }
 

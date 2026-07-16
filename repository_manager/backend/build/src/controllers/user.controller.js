@@ -1,7 +1,8 @@
 // User controllers
 // Debashish Buragohain
 import { prisma } from '../lib/prisma/index.js';
-import { authorizedPk } from '../middleware/auth/authHandler.js';
+import { authorizedPrincipal } from '../middleware/auth/authHandler.js';
+import { listSSHIdentitiesForUser, resolveUserIdFromPrincipal, upsertSSHIdentityForUser } from '../lib/auth/identity/index.js';
 // Get user by username
 export async function getUserByUsername(req, res) {
     try {
@@ -53,10 +54,15 @@ export async function getUserByWallet(req, res) {
 // Get current user profile
 export async function getUserProfile(req, res) {
     try {
-        const wallet = authorizedPk(res);
+        const principal = authorizedPrincipal(res);
+        const userId = await resolveUserIdFromPrincipal(principal);
+        if (!userId) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
         // Include the repositories and commits for the user
         const user = await prisma.user.findUnique({
-            where: { wallet },
+            where: { id: userId },
             include: {
                 repositories: true,
                 commits: true,
@@ -77,11 +83,16 @@ export async function getUserProfile(req, res) {
 // Update user
 export async function updateUser(req, res) {
     try {
-        const wallet = authorizedPk(res);
+        const principal = authorizedPrincipal(res);
+        const userId = await resolveUserIdFromPrincipal(principal);
+        if (!userId) {
+            res.status(404).send({ error: { message: 'User not found.' } });
+            return;
+        }
         const { metadata, username, } = req.body;
         // Fetch existing user
         const existingUser = await prisma.user.findUnique({
-            where: { wallet },
+            where: { id: userId },
             select: { metadata: true, username: true },
         });
         if (!existingUser) {
@@ -103,7 +114,7 @@ export async function updateUser(req, res) {
         }
         // Perform the update
         const updatedUser = await prisma.user.update({
-            where: { wallet },
+            where: { id: userId },
             data: updateData,
             include: {
                 // Optionally return related data
@@ -124,9 +135,16 @@ export async function updateUser(req, res) {
 // Deleting the user also deletes all his repositories
 export async function deleteUser(req, res) {
     try {
-        const wallet = authorizedPk(res);
+        const principal = authorizedPrincipal(res);
+        const userId = await resolveUserIdFromPrincipal(principal);
+        if (!userId) {
+            res
+                .status(404)
+                .send({ error: { message: 'User does not exist to delete!' } });
+            return;
+        }
         const deletedUser = await prisma.user.delete({
-            where: { wallet },
+            where: { id: userId },
         });
         if (!deletedUser) {
             res
@@ -140,5 +158,47 @@ export async function deleteUser(req, res) {
     catch (err) {
         console.error(`Error deleting user: ${err}`);
         res.status(500);
+    }
+}
+export async function getUserSSHKeys(req, res) {
+    try {
+        const principal = authorizedPrincipal(res);
+        const userId = await resolveUserIdFromPrincipal(principal);
+        if (!userId) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+        const keys = await listSSHIdentitiesForUser(userId);
+        res.status(200).json({ data: keys });
+    }
+    catch (err) {
+        console.error(`Error getting SSH keys: ${err}`);
+        res.status(500).send({ error: { message: 'Could not load SSH keys.' } });
+    }
+}
+export async function registerUserSSHKey(req, res) {
+    try {
+        const principal = authorizedPrincipal(res);
+        const userId = await resolveUserIdFromPrincipal(principal);
+        if (!userId) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+        const { publicKey } = req.body;
+        if (!publicKey || typeof publicKey !== 'string') {
+            res.status(400).json({ error: { message: 'publicKey is required.' } });
+            return;
+        }
+        const key = await upsertSSHIdentityForUser(userId, publicKey);
+        res.status(200).json({ data: key });
+    }
+    catch (err) {
+        const message = err?.message || 'Could not register SSH key.';
+        if (message.includes('already linked to another account')) {
+            res.status(409).json({ error: { message } });
+            return;
+        }
+        console.error(`Error registering SSH key: ${err}`);
+        res.status(400).json({ error: { message } });
     }
 }
