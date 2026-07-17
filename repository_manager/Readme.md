@@ -1,3 +1,10 @@
+# ⚠️ DEPRECATED & MOVED
+
+This monorepo is **no longer maintained**. The codebase has been migrated and split into a multi-repo structure under our new GitHub Organization to separate our open-source tools from our proprietary systems.
+
+### 🚀 New Repository Locations
+* **Flair** [https://github.com/flair-org](https://github.com/flair-org)
+
 # Repository Manager Backend for Flair
 
 Backend service for managing machine learning repositories on Solana blockchain.

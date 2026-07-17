@@ -1,3 +1,12 @@
+# ⚠️ DEPRECATED & MOVED
+
+This monorepo is **no longer maintained**. The codebase has been migrated and split into a multi-repo structure under our new GitHub Organization to separate our open-source tools from our proprietary systems.
+
+### 🚀 New Repository Locations
+* **Flair** [https://github.com/flair-org/flair](https://github.com/flair-org/flair)
+
+Please update your remotes and clone the new repositories listed above. No further pull requests or issues will be accepted here.
+
 # Flair Merger Service
 
 The merger is an independent service that applies Flower-style asynchronous aggregation to commit-based model updates.
